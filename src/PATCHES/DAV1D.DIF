@@ -1,0 +1,155 @@
+--- a/meson.build
++++ b/meson.build
+@@ -32,9 +32,13 @@
+ 
+ dav1d_src_root = meson.current_source_dir()
+ cc = meson.get_compiler('c')
++legacy_windows = get_option('legacy_windows')
+ 
+ # Configuratin data for config.h
+ cdata = configuration_data()
++if legacy_windows
++    cdata.set('RP_LEGACY', 1)
++endif
+ 
+ # Configuration data for config.asm
+ cdata_asm = configuration_data()
+@@ -112,7 +116,11 @@
+     cdata.set('_UNICODE',               1) # Define to 1 for Unicode (Wide Chars) APIs
+     cdata.set('__USE_MINGW_ANSI_STDIO', 1) # Define to force use of MinGW printf
+     cdata.set('_CRT_DECLARE_NONSTDC_NAMES', 1) # Define to get off_t from sys/types.h on MSVC
+-    if cc.has_function('fseeko', prefix : '#include <stdio.h>', args : test_args)
++    if legacy_windows and not get_option('enable_tools')
++        # The decoder library does not use stdio seeking. Keep MinGW's
++        # declarations intact; an unavailable function is not a missing name.
++        cdata.set('_FILE_OFFSET_BITS', 64)
++    elif cc.has_function('fseeko', prefix : '#include <stdio.h>', args : test_args)
+         cdata.set('_FILE_OFFSET_BITS', 64) # Not set by default by Meson on Windows
+     else
+         cdata.set('fseeko', '_fseeki64')
+@@ -123,7 +131,7 @@
+         if cc.get_argument_syntax() != 'msvc'
+             optional_link_arguments += '-Wl,--dynamicbase,--nxcompat,--tsaware,--high-entropy-va'
+         endif
+-    elif host_machine.cpu_family() == 'x86' or host_machine.cpu_family() == 'arm'
++    elif not legacy_windows and (host_machine.cpu_family() == 'x86' or host_machine.cpu_family() == 'arm')
+         if cc.get_argument_syntax() == 'msvc'
+             optional_link_arguments += '/largeaddressaware'
+         else
+@@ -292,7 +300,7 @@
+       '-Werror=missing-prototypes',
+       '-Wshorten-64-to-32',
+     ]
+-    if host_machine.cpu_family() == 'x86'
++    if host_machine.cpu_family() == 'x86' and not legacy_windows
+         optional_arguments += [
+           '-msse2',
+           '-mfpmath=sse',
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -1,4 +1,6 @@
+ # General options
++option('legacy_windows', type: 'boolean', value: false,
++       description: 'Use the RetroPlayer i386 runtime and original Win32 APIs')
+ 
+ option('bitdepths',
+     type: 'array',
+--- a/src/cpu.c
++++ b/src/cpu.c
+@@ -83,7 +83,14 @@
+ 
+ COLD int dav1d_num_logical_processors(Dav1dContext *const c) {
+ #ifdef _WIN32
+-#if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
++#if defined(RP_LEGACY)
++    DWORD_PTR mask, system_mask;
++    if (GetProcessAffinityMask(GetCurrentProcess(), &mask, &system_mask) && mask) {
++        int count = 0;
++        do { ++count; } while ((mask &= mask - 1) != 0);
++        return count;
++    }
++#elif WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
+     GROUP_AFFINITY affinity;
+     if (GetThreadGroupAffinity(GetCurrentThread(), &affinity)) {
+         int num_processors = 1;
+--- a/src/win32/thread.c
++++ b/src/win32/thread.c
+@@ -30,6 +30,7 @@
+ #if defined(_WIN32)
+ 
+ #include <process.h>
++#include <stdint.h>
+ #include <stdlib.h>
+ #include <windows.h>
+ 
+@@ -60,6 +61,25 @@
+     return 0;
+ }
+ 
++#ifdef RP_LEGACY
++typedef struct {
++    HANDLE gate;
++    pthread_t *thread;
++    int cancelled;
++} LegacyLaunch;
++static void __cdecl legacy_entrypoint(void *data) {
++    LegacyLaunch *launch = data;
++    DWORD result = WaitForSingleObject(launch->gate, INFINITE);
++    pthread_t *thread = launch->thread;
++    int cancelled = launch->cancelled;
++    CloseHandle(launch->gate);
++    free(launch);
++    if (result == WAIT_OBJECT_0 && !cancelled)
++        thread_entrypoint(thread);
++    _endthread();
++}
++#endif
++
+ COLD int dav1d_pthread_create(pthread_t *const thread,
+                               const pthread_attr_t *const attr,
+                               void *(*const func)(void*), void *const arg)
+@@ -67,9 +87,29 @@
+     const unsigned stack_size = attr ? attr->stack_size : 0;
+     thread->func = func;
+     thread->arg = arg;
++#ifdef RP_LEGACY
++    LegacyLaunch *launch = malloc(sizeof(*launch));
++    if (!launch) return 1;
++    launch->thread = thread; launch->cancelled = 0;
++    launch->gate = CreateEventA(NULL, TRUE, FALSE, NULL);
++    if (!launch->gate) { free(launch); return 1; }
++    uintptr_t original = _beginthread(legacy_entrypoint, stack_size, launch);
++    if (original == (uintptr_t)-1) {
++        CloseHandle(launch->gate); free(launch); return 1;
++    }
++    if (!DuplicateHandle(GetCurrentProcess(), (HANDLE)original, GetCurrentProcess(),
++                         &thread->h, 0, FALSE, DUPLICATE_SAME_ACCESS)) {
++        launch->cancelled = 1;
++        SetEvent(launch->gate);
++        return 1;
++    }
++    SetEvent(launch->gate);
++    return 0;
++#else
+     thread->h = (HANDLE)_beginthreadex(NULL, stack_size, thread_entrypoint, thread,
+                                        STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+     return !thread->h;
++#endif
+ }
+ 
+ COLD int dav1d_pthread_join(pthread_t *const thread, void **const res) {
+@@ -90,10 +130,11 @@
+     if (InitOnceBeginInitialize(once_control, 0, &pending, NULL) != TRUE)
+         return 1;
+ 
+-    if (pending == TRUE)
++    if (pending == TRUE) {
+         init_routine();
+-
+-    return !InitOnceComplete(once_control, 0, NULL);
++        return !InitOnceComplete(once_control, 0, NULL);
++    }
++    return 0;
+ }
+ 
+ #endif

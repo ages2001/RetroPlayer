@@ -1,0 +1,160 @@
+--- MMCORE/src/win32/thread.c
++++ TSCCORE/src/win32/thread.c
+@@ -800,6 +800,10 @@
+ }
+ 
+ /*** Clock ***/
++#if defined(RP_LEGACY) && defined(__i386__)
++# include "RPCLOCK.H"
++#endif
++
+ static union
+ {
+ #if (_WIN32_WINNT < _WIN32_WINNT_WIN7)
+@@ -958,6 +962,10 @@
+         str = var_InheritString(obj, "clock-source");
+     if (str != NULL)
+         name = str;
++#if defined(RP_LEGACY) && defined(__i386__)
++    else if (rp_tsc_available())
++        name = "tsc";
++#endif
+ #if defined(RP_LEGACY) && !VLC_WINSTORE_APP
+     /* Clock precision and scheduler resolution are independent. Keep the
+      * same period request when selecting the performance counter. */
+@@ -969,6 +977,19 @@
+             begin_period(5);
+     }
+ #endif
++#if defined(RP_LEGACY) && defined(__i386__)
++    if (!strcmp(name, "tsc")) {
++        if (rp_tsc_setup()) {
++            msg_Dbg(obj, "using calibrated QEMU processor counter (%lu kHz)",
++                    (unsigned long)(rp_tsc_clock.frequency / 1000));
++            mdate_selected = mdate_tsc;
++            free(str);
++            return TRUE;
++        }
++        msg_Warn(obj, "QEMU processor clock unavailable; using multimedia timers");
++        name = "multimedia";
++    }
++#endif
+     if (!strcmp (name, "interrupt"))
+     {
+         msg_Dbg (obj, "using interrupt time as clock source");
+@@ -1057,7 +1078,7 @@
+ size_t EnumClockSource (vlc_object_t *obj, const char *var,
+                         char ***vp, char ***np)
+ {
+-    const size_t max = 6;
++    const size_t max = 7;
+     char **values = xmalloc (sizeof (*values) * max);
+     char **names = xmalloc (sizeof (*names) * max);
+     size_t n = 0;
+@@ -1070,6 +1091,13 @@
+     values[n] = xstrdup ("");
+     names[n] = xstrdup (_("Auto"));
+     n++;
++#if defined(RP_LEGACY) && defined(__i386__)
++    if (rp_tsc_available()) {
++        values[n] = xstrdup("tsc");
++        names[n] = xstrdup(_("Calibrated QEMU processor counter"));
++        n++;
++    }
++#endif
+ #if (_WIN32_WINNT < _WIN32_WINNT_WIN7)
+     if (version >= 0x0601)
+ #endif
+--- /dev/null
++++ TSCCORE/src/win32/RPCLOCK.H
+@@ -0,0 +1,90 @@
++/* Legacy QEMU clock workaround. Included only by the Win32 clock backend.
++ * NT/Win9x PIT-based clocks can lose interrupts during emulated GDI work.
++ * Do not infer a reliable physical TSC from the instruction's presence alone.
++ */
++#include <cpuid.h>
++
++static struct {
++    uint64_t frequency, origin;
++    vlc_tick_t epoch;
++} rp_tsc_clock;
++
++static bool rp_tsc_available(void)
++{
++    unsigned a, b, c, d;
++    SYSTEM_INFO info;
++    if (!__get_cpuid(1, &a, &b, &c, &d) || !(d & (1U << 4)))
++        return false;
++    /* CPUID is known to exist before querying the hypervisor signature.
++     * Avoid assumptions about synchronized counters on multiprocessor hosts. */
++    GetSystemInfo(&info);
++    if (info.dwNumberOfProcessors != 1)
++        return false;
++    __cpuid(0x40000000, a, b, c, d);
++    char vendor[12];
++    memcpy(vendor, &b, 4);
++    memcpy(vendor + 4, &c, 4);
++    memcpy(vendor + 8, &d, 4);
++    return a >= 0x40000001 && !memcmp(vendor, "TCGTCGTCGTCG", 12);
++}
++
++static uint64_t rp_tsc_read(void)
++{
++    unsigned lo, hi;
++    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi) : : "memory");
++    return ((uint64_t)hi << 32) | lo;
++}
++
++static bool rp_tsc_setup(void)
++{
++    LARGE_INTEGER frequency;
++    uint64_t rates[7];
++    unsigned count = 0;
++    if (!rp_tsc_available() || !QueryPerformanceFrequency(&frequency) ||
++        frequency.QuadPart <= 0 || frequency.QuadPart > 10000000000LL)
++        return false;
++    /* Calibrate while the output is still inactive. Lost PIT ticks inflate
++     * an interval's estimated frequency; require a consistent low cluster.
++     * Never calibrate against a hardcoded CPU model or a host MHz value. */
++    for (unsigned i = 0; i < ARRAY_SIZE(rates); ++i) {
++        LARGE_INTEGER before, after;
++        if (!QueryPerformanceCounter(&before)) return false;
++        uint64_t start = rp_tsc_read();
++        Sleep(40);
++        if (!QueryPerformanceCounter(&after)) return false;
++        uint64_t end = rp_tsc_read();
++        int64_t elapsed = after.QuadPart - before.QuadPart;
++        if (elapsed <= 0 || end <= start ||
++            elapsed < frequency.QuadPart / 50 ||
++            elapsed > frequency.QuadPart / 5)
++            continue;
++        uint64_t ticks = end - start;
++        uint64_t rate = ticks / elapsed * frequency.QuadPart +
++            ticks % elapsed * frequency.QuadPart / elapsed;
++        if (rate < 1000000 || rate > 100000000000ULL) continue;
++        unsigned j = count++;
++        while (j && rates[j - 1] > rate) {
++            rates[j] = rates[j - 1];
++            --j;
++        }
++        rates[j] = rate;
++    }
++    for (unsigned i = 0; i + 2 < count; ++i) {
++        if (rates[i + 2] - rates[i] > rates[i] / 400) continue;
++        rp_tsc_clock.frequency = rates[i + 1];
++        rp_tsc_clock.epoch = (vlc_tick_t)GetTickCount() * 1000 + 1;
++        rp_tsc_clock.origin = rp_tsc_read();
++        return true;
++    }
++    return false;
++}
++
++static vlc_tick_t mdate_tsc(void)
++{
++    const uint64_t ticks = rp_tsc_read() - rp_tsc_clock.origin;
++    const uint64_t frequency = rp_tsc_clock.frequency;
++    /* Split before multiplying so a long-running process cannot overflow
++     * merely because its counter has accumulated many CPU cycles. */
++    return rp_tsc_clock.epoch + ticks / frequency * CLOCK_FREQ +
++        ticks % frequency * CLOCK_FREQ / frequency;
++}

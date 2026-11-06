@@ -1,0 +1,3742 @@
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -104,7 +104,7 @@
+ 	cd compat && $(MAKE) $(AM_MAKEFLAGS)
+ 
+ libvlccore: libcompat
+-	cd src && $(MAKE) $(AM_MAKEFLAGS) libvlccore.la
++	cd src && $(MAKE) $(AM_MAKEFLAGS) libcore.la
+ 
+ libvlc: libvlccore
+ 	cd lib && $(MAKE) $(AM_MAKEFLAGS) libvlc.la
+--- a/configure.ac
++++ b/configure.ac
+@@ -881,6 +881,7 @@
+ ])
+ AC_SUBST(LIBPTHREAD)
+ 
++AS_IF([test "${SYS}" != "mingw32"], [
+ AC_SEARCH_LIBS([clock_nanosleep], [rt pthread], [
+   AS_IF([test "$ac_cv_search_clock_nanosleep" != "none required"], [
+     LIBRT="$ac_cv_search_clock_nanosleep"
+@@ -891,6 +892,7 @@
+       LIBRT="$ac_cv_search_nanosleep"
+     ])
+   ])
++])
+ ])
+ AC_SUBST(LIBRT)
+ 
+@@ -1031,10 +1033,15 @@
+ AX_APPEND_COMPILE_FLAGS([-pipe], [CFLAGS])
+ 
+ dnl Checks for socket stuff
++AC_ARG_ENABLE([retro],
++  AS_HELP_STRING([--enable-retro], [build the RetroPlayer legacy Win32 port]),
++  [], [enable_retro=no])
++AM_CONDITIONAL([HAVE_RETRO], [test "${enable_retro}" = "yes"])
+ VLC_SAVE_FLAGS
+ SOCKET_LIBS=""
+ AS_IF([test "${SYS}" = "mingw32"], [
+-  SOCKET_LIBS="-lws2_32 -liphlpapi"
++  AS_IF([test "${enable_retro}" = "yes"],
++    [SOCKET_LIBS="-lwsock32"], [SOCKET_LIBS="-lws2_32 -liphlpapi"])
+ ],[
+   AC_SEARCH_LIBS(connect, [socket], [
+     AS_IF([test "$ac_cv_search_connect" != "none required"], [
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -167,7 +167,7 @@
+ # Building libvlc
+ ###############################################################################
+ 
+-lib_LTLIBRARIES = libvlccore.la
++lib_LTLIBRARIES = libcore.la
+ 
+ AM_CPPFLAGS = $(INCICONV) $(IDN_CFLAGS) \
+ 	-DMODULE_STRING=\"core\" \
+@@ -183,7 +183,7 @@
+ AM_CFLAGS += $(DBUS_CFLAGS)
+ endif
+ 
+-libvlccore_la_SOURCES = \
++libcore_la_SOURCES = \
+ 	libvlc.c \
+ 	libvlc.h \
+ 	libvlc-module.c \
+@@ -353,13 +353,13 @@
+ 	misc/text_style.c \
+ 	misc/subpicture.c \
+ 	misc/subpicture.h
+-libvlccore_la_LIBADD = $(LIBS_libvlccore) \
++libcore_la_LIBADD = $(LIBS_libvlccore) \
+ 	../compat/libcompat.la \
+ 	$(LTLIBINTL) $(LTLIBICONV) \
+ 	$(IDN_LIBS) $(LIBPTHREAD) $(SOCKET_LIBS) $(LIBRT) $(LIBDL) $(LIBM)
+ 
+ if HAVE_WIN32
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	win32/dirs.c \
+ 	win32/error.c \
+ 	win32/filesystem.c \
+@@ -368,15 +368,16 @@
+ 	win32/rand.c \
+ 	win32/specific.c \
+ 	win32/thread.c \
++	win32/RPCLOCK.H \
+ 	win32/winsock.c
+ if HAVE_WINSTORE
+-libvlccore_la_SOURCES += posix/timer.c
++libcore_la_SOURCES += posix/timer.c
+ else
+-libvlccore_la_SOURCES += win32/timer.c
++libcore_la_SOURCES += posix/timer.c
+ endif
+ else
+ if HAVE_OS2
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	os2/dirs.c \
+ 	darwin/error.c \
+ 	os2/filesystem.c \
+@@ -388,7 +389,7 @@
+ 	os2/thread.c
+ else
+ if HAVE_NACL
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	android/error.c \
+ 	posix/dirs.c \
+ 	posix/filesystem.c \
+@@ -397,13 +398,13 @@
+ 	posix/specific.c \
+ 	posix/timer.c
+ else
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	posix/filesystem.c \
+ 	posix/plugin.c \
+ 	posix/rand.c \
+ 	posix/timer.c
+ if HAVE_ANDROID
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	android/error.c \
+ 	android/specific.c \
+ 	android/thread.c \
+@@ -412,32 +413,32 @@
+ 	linux/thread.c
+ else
+ if HAVE_DARWIN
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	darwin/dirs.c \
+ 	darwin/error.c \
+ 	darwin/netconf.c \
+ 	darwin/specific.c \
+ 	darwin/thread.c
+ else
+-libvlccore_la_LIBADD += $(LIBEXECINFO)
+-libvlccore_la_SOURCES += \
++libcore_la_LIBADD += $(LIBEXECINFO)
++libcore_la_SOURCES += \
+ 	posix/dirs.c \
+ 	posix/error.c \
+ 	posix/netconf.c \
+ 	posix/specific.c \
+ 	posix/thread.c
+ if HAVE_LINUX
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	linux/cpu.c \
+ 	linux/dirs.c \
+ 	linux/thread.c
+ endif
+ if HAVE_LIBANL
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	linux/getaddrinfo.c
+-libvlccore_la_LIBADD += -lanl
++libcore_la_LIBADD += -lanl
+ else
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	posix/getaddrinfo.c
+ endif
+ endif
+@@ -447,43 +448,43 @@
+ endif
+ 
+ if ENABLE_SOUT
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	stream_output/sap.c stream_output/sdp.c \
+ 	stream_output/stream_output.c stream_output/stream_output.h
+ if ENABLE_VLM
+-libvlccore_la_SOURCES += input/vlm.c input/vlm_event.c input/vlmshell.c
++libcore_la_SOURCES += input/vlm.c input/vlm_event.c input/vlmshell.c
+ endif
+ endif
+ 
+ if UPDATE_CHECK
+-libvlccore_la_SOURCES += \
++libcore_la_SOURCES += \
+ 	misc/update.h misc/update.c \
+ 	misc/update_crypto.c
+ AM_CPPFLAGS += -DUPDATE_CHECK
+ AM_CFLAGS += $(GCRYPT_CFLAGS)
+-libvlccore_la_LIBADD += $(GCRYPT_LIBS)
+-endif
+-
+-libvlccore_la_LDFLAGS = \
++libcore_la_LIBADD += $(GCRYPT_LIBS)
++endif
++
++libcore_la_LDFLAGS = \
+ 	$(LDFLAGS_libvlccore) \
+ 	-no-undefined \
+ 	-export-symbols $(srcdir)/libvlccore.sym \
+ 	-version-info 9:1:0
+-libvlccore_la_DEPENDENCIES = libvlccore.sym
++libcore_la_DEPENDENCIES = libvlccore.sym
+ if HAVE_WIN32
+-libvlccore_la_DEPENDENCIES += libvlc_win32_rc.$(OBJEXT)
+-libvlccore_la_LDFLAGS += -Wl,libvlc_win32_rc.$(OBJEXT) -avoid-version -Wc,-static $(LIBCOM)
++libcore_la_DEPENDENCIES += libvlc_win32_rc.$(OBJEXT)
++libcore_la_LDFLAGS += -Wl,libvlc_win32_rc.$(OBJEXT) -avoid-version -Wc,-static $(LIBCOM)
+ endif
+ if HAVE_OS2
+-libvlccore_la_LDFLAGS += -avoid-version
++libcore_la_LDFLAGS += -avoid-version
+ endif
+ if HAVE_DBUS
+-libvlccore_la_LIBADD += $(DBUS_LIBS)
++libcore_la_LIBADD += $(DBUS_LIBS)
+ endif
+ if HAVE_DARWIN
+-libvlccore_la_LDFLAGS += -Xlinker -install_name -Xlinker @rpath/libvlccore.dylib
++libcore_la_LDFLAGS += -Xlinker -install_name -Xlinker @rpath/libvlccore.dylib
+ if !HAVE_OSX
+-libvlccore_la_LDFLAGS += -Wl,-framework,CFNetwork
++libcore_la_LDFLAGS += -Wl,-framework,CFNetwork
+ endif
+ endif
+ 
+@@ -542,7 +543,7 @@
+ test_mrl_helpers_SOURCES = test/mrl_helpers.c
+ 
+ AM_LDFLAGS = -no-install
+-LDADD = libvlccore.la \
++LDADD = libcore.la \
+ 	../compat/libcompat.la
+ 
+ ###############################################################################
+--- a/lib/Makefile.am
++++ b/lib/Makefile.am
+@@ -56,7 +56,7 @@
+ EXTRA_DIST = libvlc.pc.in libvlc.sym ../include/vlc/libvlc_version.h.in
+ 
+ libvlc_la_LIBADD = \
+-	../src/libvlccore.la ../compat/libcompat.la $(LIBPTHREAD) $(LIBM)
++	../src/libcore.la ../compat/libcompat.la $(LIBPTHREAD) $(LIBM)
+ libvlc_la_LDFLAGS = \
+ 	$(LDFLAGS_libvlc) \
+ 	-no-undefined \
+--- a/modules/common.am
++++ b/modules/common.am
+@@ -12,7 +12,7 @@
+ BUILT_SOURCES =
+ CLEANFILES = $(BUILT_SOURCES)
+ 
+-LTLIBVLCCORE = $(top_builddir)/src/libvlccore.la
++LTLIBVLCCORE = $(top_builddir)/src/libcore.la
+ 
+ # Module name from object or executable file name.
+ MODULE_NAME = $$(p="$@"; p="$${p\#\#*/}"; p="$${p\#lib}"; p="$${p%_plugin*}"; p=$$(echo "$$p"|sed 's/-/_/g'); p="$${p%.lo}"; echo "$$p")
+--- a/modules/video_chroma/Makefile.am
++++ b/modules/video_chroma/Makefile.am
+@@ -134,11 +134,11 @@
+ # Tests
+ chroma_copy_sse_test_SOURCES = $(libchroma_copy_la_SOURCES)
+ chroma_copy_sse_test_CFLAGS = -DCOPY_TEST
+-chroma_copy_sse_test_LDADD = ../src/libvlccore.la
++chroma_copy_sse_test_LDADD = ../src/libcore.la
+ 
+ chroma_copy_test_SOURCES = $(libchroma_copy_la_SOURCES)
+ chroma_copy_test_CFLAGS = -DCOPY_TEST -DCOPY_TEST_NOOPTIM
+-chroma_copy_test_LDADD = ../src/libvlccore.la
++chroma_copy_test_LDADD = ../src/libcore.la
+ 
+ if HAVE_SSE2
+ check_PROGRAMS += chroma_copy_sse_test
+--- a/modules/video_output/Makefile.am
++++ b/modules/video_output/Makefile.am
+@@ -470,6 +470,11 @@
+ 
+ libvdummy_plugin_la_SOURCES = video_output/vdummy.c
+ libvmem_plugin_la_SOURCES = video_output/vmem.c
++librpgdi_plugin_la_SOURCES = video_output/RPGDI.c
++librpgdi_plugin_la_LIBADD = -lgdi32 -luser32
++if HAVE_WIN32
++vout_LTLIBRARIES += librpgdi_plugin.la
++endif
+ libyuv_plugin_la_SOURCES = video_output/yuv.c
+ 
+ vout_LTLIBRARIES += \
+--- /dev/null
++++ b/modules/video_output/RPGDI.c
+@@ -0,0 +1,239 @@
++/* Legacy embedded GDI output, LGPL-2.1-or-later.
++ * Uses ordinary DIB memory: CreateDIBSection is absent on Windows NT 3.1. */
++#ifdef HAVE_CONFIG_H
++# include "config.h"
++#endif
++#include <vlc_common.h>
++#include <vlc_plugin.h>
++#include <vlc_vout_display.h>
++#include <vlc_picture_pool.h>
++#include <windows.h>
++
++static int Open(vlc_object_t *);
++static void Close(vlc_object_t *);
++vlc_module_begin()
++    set_shortname("Legacy GDI")
++    set_description("Legacy Windows DIB video output")
++    set_category(CAT_VIDEO)
++    set_subcategory(SUBCAT_VIDEO_VOUT)
++    set_capability("vout display", 100)
++    add_shortcut("rpgdi")
++    set_callbacks(Open,Close)
++vlc_module_end()
++
++struct vout_display_sys_t {
++    HWND window;
++    picture_pool_t *pool;
++    picture_t *last;
++    vout_display_cfg_t config;
++    unsigned width,height;
++    mtime_t refreshed;
++    uint8_t *dib;
++    size_t dib_size;
++    HDC surface;
++    HBITMAP bitmap;
++    HGDIOBJ old_bitmap;
++    unsigned surface_width, surface_height, surface_depth;
++    bool prepared;
++    bool cache_valid;
++    unsigned cached_width, cached_height;
++    vout_display_place_t cached_place;
++};
++static picture_pool_t *Pool(vout_display_t *vd,unsigned count)
++{
++    if (!vd->sys->pool) vd->sys->pool=picture_pool_NewFromFormat(&vd->fmt,count);
++    return vd->sys->pool;
++}
++static bool Draw(vout_display_t *vd, picture_t *picture, HDC dc,
++                 const RECT *client)
++{
++    vout_display_sys_t *sys=vd->sys;
++    BITMAPINFO bitmap;
++    vout_display_place_t place;
++    unsigned width=vd->fmt.i_visible_width,height=vd->fmt.i_visible_height;
++    unsigned x=vd->fmt.i_x_offset,y=vd->fmt.i_y_offset;
++    size_t stride,size;
++    bool unchanged=sys->cache_valid && dc==sys->surface &&
++        sys->cached_width==width && sys->cached_height==height;
++    if (!picture || client->right<=0 || client->bottom<=0) return false;
++    /* Positive-height, 24-bit DIBs work with the original Win95 display
++     * drivers, including drivers that reject top-down 32-bit StretchDIBits.
++     * Copy just the visible image so source offsets use no DIB conventions. */
++    if (!width || !height || width>(SIZE_MAX-3)/3 ||
++        x>=(unsigned)picture->p[0].i_pitch/4 ||
++        width>(unsigned)picture->p[0].i_pitch/4-x ||
++        y>=(unsigned)picture->p[0].i_lines ||
++        height>(unsigned)picture->p[0].i_lines-y) return false;
++    stride=((size_t)width*3+3)&~(size_t)3;
++    if (height>SIZE_MAX/stride) return false;
++    size=stride*height;
++    if (size>sys->dib_size) {
++        uint8_t *dib=realloc(sys->dib,size);
++        if (!dib) return false;
++        sys->dib=dib; sys->dib_size=size;
++        unchanged=false;
++    }
++    for (unsigned row=0;row<height;row++) {
++        const uint8_t *src=picture->p[0].p_pixels+(size_t)(y+row)*picture->p[0].i_pitch+x*4;
++        uint8_t *dst=sys->dib+(height-1-row)*stride;
++        for (unsigned col=0;col<width;col++) {
++            if (unchanged && (dst[col*3]!=src[col*4] ||
++                dst[col*3+1]!=src[col*4+1] || dst[col*3+2]!=src[col*4+2]))
++                unchanged=false;
++            dst[col*3]=src[col*4]; dst[col*3+1]=src[col*4+1]; dst[col*3+2]=src[col*4+2];
++        }
++        memset(dst+width*3,0,stride-width*3);
++    }
++    sys->config.display.width=client->right;
++    sys->config.display.height=client->bottom;
++    vout_display_PlacePicture(&place,&vd->source,&sys->config,false);
++    /* VLC also prepares repeats while paused or waiting for the next frame.
++     * Compare actual pixels, including blended subtitles, rather than using
++     * timestamps or buffer addresses as a proxy for unchanged content. */
++    if (unchanged && place.x==sys->cached_place.x && place.y==sys->cached_place.y &&
++        place.width==sys->cached_place.width && place.height==sys->cached_place.height)
++        return true;
++    sys->cache_valid=false;
++    memset(&bitmap,0,sizeof(bitmap));
++    bitmap.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
++    bitmap.bmiHeader.biWidth=width;
++    bitmap.bmiHeader.biHeight=height;
++    bitmap.bmiHeader.biPlanes=1;
++    bitmap.bmiHeader.biBitCount=24;
++    bitmap.bmiHeader.biCompression=BI_RGB;
++    /* Clear only the letterbox borders; avoid flashing the video rectangle. */
++    PatBlt(dc,0,0,client->right,place.y,BLACKNESS);
++    PatBlt(dc,0,place.y+place.height,client->right,client->bottom-place.y-place.height,BLACKNESS);
++    PatBlt(dc,0,place.y,place.x,place.height,BLACKNESS);
++    PatBlt(dc,place.x+place.width,place.y,client->right-place.x-place.width,place.height,BLACKNESS);
++    SetStretchBltMode(dc,COLORONCOLOR);
++    int drawn=StretchDIBits(dc,place.x,place.y,place.width,place.height,
++        0,0,width,height,sys->dib,&bitmap,DIB_RGB_COLORS,SRCCOPY);
++    if (drawn==0 || drawn==GDI_ERROR)
++        msg_Err(vd,"StretchDIBits returned %d: %lu",drawn,GetLastError());
++    else if (dc==sys->surface) {
++        sys->cache_valid=true;
++        sys->cached_width=width; sys->cached_height=height;
++        sys->cached_place=place;
++    }
++    return drawn!=0 && drawn!=GDI_ERROR;
++}
++static void DeleteSurface(vout_display_sys_t *sys)
++{
++    if (sys->surface) {
++        SelectObject(sys->surface,sys->old_bitmap);
++        DeleteObject(sys->bitmap);
++        DeleteDC(sys->surface);
++    }
++    sys->surface=NULL;
++    sys->bitmap=NULL;
++    sys->prepared=false;
++    sys->cache_valid=false;
++}
++static void Prepare(vout_display_t *vd, picture_t *picture,
++                    subpicture_t *subpicture)
++{
++    vout_display_sys_t *sys=vd->sys;
++    RECT client;
++    VLC_UNUSED(subpicture);
++    sys->prepared=false;
++    if (!GetClientRect(sys->window,&client) ||
++        client.right<=0 || client.bottom<=0) return;
++    HDC dc=GetDC(sys->window);
++    if (!dc) return;
++    unsigned depth=GetDeviceCaps(dc,BITSPIXEL)*GetDeviceCaps(dc,PLANES);
++    if (!sys->surface || sys->surface_width!=(unsigned)client.right ||
++        sys->surface_height!=(unsigned)client.bottom || sys->surface_depth!=depth) {
++        /* Compatible bitmaps/DCs exist on NT3.1. Scale and quantize here so
++         * VLC measures this work before choosing the presentation deadline. */
++        HDC surface=CreateCompatibleDC(dc);
++        HBITMAP bitmap=surface ? CreateCompatibleBitmap(dc,client.right,client.bottom) : NULL;
++        HGDIOBJ old=bitmap ? SelectObject(surface,bitmap) : NULL;
++        if (!old || old==HGDI_ERROR) {
++            if (bitmap) DeleteObject(bitmap);
++            if (surface) DeleteDC(surface);
++            ReleaseDC(sys->window,dc);
++            return; /* Display retains the immediate DIB fallback. */
++        }
++        DeleteSurface(sys);
++        sys->surface=surface; sys->bitmap=bitmap; sys->old_bitmap=old;
++        sys->surface_width=client.right; sys->surface_height=client.bottom;
++        sys->surface_depth=depth;
++    }
++    ReleaseDC(sys->window,dc);
++    sys->prepared=Draw(vd,picture,sys->surface,&client);
++}
++static void Present(vout_display_t *vd)
++{
++    vout_display_sys_t *sys=vd->sys;
++    HDC dc=GetDC(sys->window);
++    if (!dc) return;
++    bool copied=sys->prepared && BitBlt(dc,0,0,sys->surface_width,
++                                       sys->surface_height,sys->surface,0,0,SRCCOPY);
++    if (!copied) {
++        RECT client;
++        if (GetClientRect(sys->window,&client)) Draw(vd,sys->last,dc,&client);
++    }
++    ReleaseDC(sys->window,dc);
++    sys->refreshed=mdate();
++}
++static void Display(vout_display_t *vd,picture_t *picture,subpicture_t *subpicture)
++{
++    if (vd->sys->last) picture_Release(vd->sys->last);
++    vd->sys->last=picture;
++    Present(vd);
++    VLC_UNUSED(subpicture);
++}
++static void Manage(vout_display_t *vd)
++{
++    RECT client;
++    if (GetClientRect(vd->sys->window,&client) && client.right>0 && client.bottom>0 &&
++        ((unsigned)client.right!=vd->sys->width || (unsigned)client.bottom!=vd->sys->height)) {
++        vd->sys->width=client.right; vd->sys->height=client.bottom;
++        vout_display_SendEventDisplaySize(vd,client.right,client.bottom);
++        if (vd->sys->last) {
++            Prepare(vd,vd->sys->last,NULL);
++            Present(vd);
++        }
++    }
++    /* Restore an exposed or resized window while playback is paused. */
++    if (vd->sys->last && mdate()-vd->sys->refreshed>=100000) Present(vd);
++}
++static int Control(vout_display_t *vd,int query,va_list args)
++{
++    switch(query) {
++    case VOUT_DISPLAY_CHANGE_DISPLAY_SIZE:
++    case VOUT_DISPLAY_CHANGE_DISPLAY_FILLED:
++    case VOUT_DISPLAY_CHANGE_ZOOM:
++        vd->sys->config=*va_arg(args,const vout_display_cfg_t *);
++        return VLC_SUCCESS;
++    case VOUT_DISPLAY_CHANGE_SOURCE_ASPECT:
++    case VOUT_DISPLAY_CHANGE_SOURCE_CROP:
++        return VLC_SUCCESS;
++    default: return VLC_EGENERIC;
++    }
++}
++static int Open(vlc_object_t *object)
++{
++    vout_display_t *vd=(vout_display_t *)object;
++    HWND window=(HWND)(uintptr_t)var_InheritInteger(vd,"drawable-hwnd");
++    if (!window || !IsWindow(window)) return VLC_EGENERIC;
++    vd->sys=calloc(1,sizeof(*vd->sys));
++    if (!vd->sys) return VLC_ENOMEM;
++    vd->sys->window=window; vd->sys->config=*vd->cfg;
++    video_format_ApplyRotation(&vd->fmt,&vd->source);
++    vd->fmt.i_chroma=VLC_CODEC_RGB32;
++    vd->fmt.i_rmask=0xff0000; vd->fmt.i_gmask=0x00ff00; vd->fmt.i_bmask=0x0000ff;
++    vd->pool=Pool; vd->prepare=Prepare; vd->display=Display; vd->manage=Manage; vd->control=Control;
++    vout_display_DeleteWindow(vd,NULL);
++    return VLC_SUCCESS;
++}
++static void Close(vlc_object_t *object)
++{
++    vout_display_t *vd=(vout_display_t *)object;
++    if (vd->sys->last) picture_Release(vd->sys->last);
++    if (vd->sys->pool) picture_pool_Release(vd->sys->pool);
++    DeleteSurface(vd->sys);
++    free(vd->sys->dib);
++    free(vd->sys);
++}
+--- a/modules/video_output/win32/win32touch.h
++++ b/modules/video_output/win32/win32touch.h
+@@ -28,7 +28,7 @@
+ # include "config.h"
+ #endif
+ 
+-#if _WIN32_WINNT < 0x0601 // _WIN32_WINNT_WIN7
++#if !defined(RP_LEGACY) && _WIN32_WINNT < 0x0601 // _WIN32_WINNT_WIN7
+ # undef _WIN32_WINNT
+ # define _WIN32_WINNT _WIN32_WINNT_WIN7
+ # undef WINVER
+@@ -52,6 +52,16 @@
+ };
+ 
+ 
++#ifdef RP_LEGACY
++/* None of the NT3/4/9x targets provides the Windows 7 gesture API. */
++typedef struct win32_gesture_sys_t win32_gesture_sys_t;
++static inline BOOL InitGestures(HWND window,win32_gesture_sys_t **gesture,bool projected)
++{ (void)window; (void)projected; *gesture=NULL; return FALSE; }
++static inline LRESULT DecodeGesture(vlc_object_t *object,win32_gesture_sys_t *gesture,
++    HWND window,UINT message,WPARAM wparam,LPARAM lparam)
++{ (void)object; (void)gesture; return DefWindowProc(window,message,wparam,lparam); }
++static inline void CloseGestures(win32_gesture_sys_t *gesture) { (void)gesture; }
++#else
+ typedef struct win32_gesture_sys_t {
+     DWORD       i_type;                 /* Gesture ID */
+     int         i_action;               /* GESTURE_ACTION */
+@@ -78,6 +88,7 @@
+         HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam );
+ 
+ void CloseGestures( win32_gesture_sys_t *p_gesture );
++#endif
+ 
+ #ifdef __cplusplus
+ }
+--- a/modules/video_output/win32/win32touch.c
++++ b/modules/video_output/win32/win32touch.c
+@@ -27,6 +27,8 @@
+ 
+ #include "win32touch.h"
+ 
++#ifndef RP_LEGACY
++
+ #include <vlc_actions.h>
+ 
+ #include <assert.h>
+@@ -391,3 +393,5 @@
+         FreeLibrary( p_gesture->huser_dll );
+     free( p_gesture );
+ }
++
++#endif /* !RP_LEGACY */
+--- a/src/video_output/vout_internal.h
++++ b/src/video_output/vout_internal.h
+@@ -26,6 +26,7 @@
+ #define LIBVLC_VOUT_INTERNAL_H 1
+ 
+ #include <vlc_picture_fifo.h>
++#include <vlc_atomic.h>
+ #include <vlc_picture_pool.h>
+ #include <vlc_vout_display.h>
+ #include <vlc_vout_wrapper.h>
+@@ -91,6 +92,8 @@
+         picture_t   *current;
+         picture_t   *next;
+     } displayed;
++    /* Prepared pictures have left decoder_fifo but are not displayed yet. */
++    atomic_bool display_pending;
+ 
+     struct {
+         vlc_tick_t  last;
+@@ -136,6 +139,9 @@
+     picture_pool_t  *decoder_pool;
+     picture_fifo_t  *decoder_fifo;
+     vout_chrono_t   render;           /**< picture render time estimator */
++#ifdef RP_LEGACY
++    vlc_tick_t     display_delay;    /**< synchronous presentation duration */
++#endif
+ };
+ 
+ /* TODO to move them to vlc_vout.h */
+--- a/src/video_output/video_output.c
++++ b/src/video_output/video_output.c
+@@ -131,6 +131,7 @@
+ 
+     /* */
+     vout->p = (vout_thread_sys_t*)&vout[1];
++    atomic_init(&vout->p->display_pending, false);
+ 
+     vout->p->original = original;
+     vout->p->dpb_size = cfg->dpb_size;
+@@ -340,7 +341,7 @@
+     if (picture)
+         picture_Release(picture);
+ 
+-    return !picture;
++    return !picture && !atomic_load(&vout->p->display_pending);
+ }
+ 
+ void vout_NextPicture(vout_thread_t *vout, vlc_tick_t *duration)
+@@ -1171,18 +1172,35 @@
+         msg_Warn(vout, "picture is late (%lld ms)", delay / 1000);
+ #endif
+     if (!is_forced)
++#ifdef RP_LEGACY
++        /* A legacy software display can spend tens of milliseconds copying
++         * pixels. Its completion, rather than entry into Display, is the
++         * presentation time. Keep this estimate separate from preparation
++         * so waiting for the deadline cannot inflate the measured cost. */
++        mwait(todisplay->date - vout->p->display_delay);
++#else
+         mwait(todisplay->date);
++#endif
+ 
+     /* Display the direct buffer returned by vout_RenderPicture */
+     vout->p->displayed.date = mdate();
+     vout_display_Display(vd, todisplay, subpic);
++#ifdef RP_LEGACY
++    const vlc_tick_t display_duration = mdate() - vout->p->displayed.date;
++    if (display_duration >= 0)
++        vout->p->display_delay = vout->p->display_delay ?
++            (3 * vout->p->display_delay + display_duration) / 4 : display_duration;
++    /* Refresh intervals start after the visible copy has completed. Counting
++     * the copy itself as idle time can otherwise trigger continuous redraws. */
++    vout->p->displayed.date += display_duration;
++#endif
+ 
+     vout_statistic_AddDisplayed(&vout->p->statistic, 1);
+ 
+     return VLC_SUCCESS;
+ }
+ 
+-static int ThreadDisplayPicture(vout_thread_t *vout, vlc_tick_t *deadline)
++static int ThreadDisplayPictureInternal(vout_thread_t *vout, vlc_tick_t *deadline)
+ {
+     bool frame_by_frame = !deadline;
+     bool paused = vout->p->pause.is_on;
+@@ -1197,13 +1215,20 @@
+             ;
+ 
+     const vlc_tick_t date = mdate();
+-    const vlc_tick_t render_delay = vout_chrono_GetHigh(&vout->p->render) + VOUT_MWAIT_TOLERANCE;
++    const vlc_tick_t render_delay = vout_chrono_GetHigh(&vout->p->render) + VOUT_MWAIT_TOLERANCE
++#ifdef RP_LEGACY
++        + vout->p->display_delay
++#endif
++        ;
+ 
+     bool drop_next_frame = frame_by_frame;
+     vlc_tick_t date_next = VLC_TICK_INVALID;
+     if (!paused && vout->p->displayed.next) {
+         date_next = vout->p->displayed.next->date - render_delay;
+-        if (date_next /* + 0 FIXME */ <= date)
++        /* Preparing two queued pictures during startup must not discard the
++         * first before it has ever been displayed when dropping is disabled. */
++        if (date_next /* + 0 FIXME */ <= date &&
++            (!first || vout->p->is_late_dropped))
+             drop_next_frame = true;
+     }
+ 
+@@ -1251,6 +1276,16 @@
+     return force_refresh ? VLC_EGENERIC : ret;
+ }
+ 
++static int ThreadDisplayPicture(vout_thread_t *vout, vlc_tick_t *deadline)
++{
++    /* Publish before removing from decoder_fifo so EOF cannot race the last
++     * scheduled frame. Only the display thread touches displayed.next. */
++    atomic_store(&vout->p->display_pending, true);
++    int result = ThreadDisplayPictureInternal(vout, deadline);
++    atomic_store(&vout->p->display_pending, vout->p->displayed.next != NULL);
++    return result;
++}
++
+ static void ThreadDisplaySubpicture(vout_thread_t *vout,
+                                     subpicture_t *subpicture)
+ {
+@@ -1318,6 +1353,26 @@
+ 
+ static void ThreadFlush(vout_thread_t *vout, bool below, vlc_tick_t date)
+ {
++#ifdef RP_LEGACY
++    /* Buffering can rebase the clock before the display thread has consumed
++     * its forced first-picture preview. The second picture requests a partial
++     * flush against the new clock; the preview still has an old-clock date
++     * and can otherwise be removed without ever reaching the output. Present
++     * that initial preview before applying the partial flush. Full seek/stop
++     * flushes must discard it, and an existing display must not be replayed. */
++    if (!below && date > VLC_TICK_INVALID + 1 &&
++        !vout->p->displayed.current && !vout->p->displayed.next &&
++        !vout->p->displayed.decoded) {
++        picture_t *preview = picture_fifo_Peek(vout->p->decoder_fifo);
++        bool forced = preview && preview->b_force;
++        if (preview)
++            picture_Release(preview);
++        if (forced) {
++            vlc_tick_t deadline = VLC_TICK_INVALID;
++            ThreadDisplayPicture(vout, &deadline);
++        }
++    }
++#endif
+     vout->p->step.timestamp = VLC_TICK_INVALID;
+     vout->p->step.last      = VLC_TICK_INVALID;
+ 
+@@ -1602,10 +1657,16 @@
+     vout->p->pause.date      = VLC_TICK_INVALID;
+ 
+     vout_chrono_Init(&vout->p->render, 5, 10000); /* Arbitrary initial time */
++#ifdef RP_LEGACY
++    vout->p->display_delay = 0;
++#endif
+ }
+ 
+ static void ThreadClean(vout_thread_t *vout)
+ {
++#ifdef RP_LEGACY
++    msg_Dbg(vout, "Legacy display latency estimate: %ld us", (long)vout->p->display_delay);
++#endif
+     vout_chrono_Clean(&vout->p->render);
+     vout->p->dead = true;
+     vout_control_Dead(&vout->p->control);
+--- a/src/audio_output/aout_internal.h
++++ b/src/audio_output/aout_internal.h
+@@ -80,6 +80,9 @@
+         vlc_tick_t end; /**< Last seen PTS */
+         unsigned resamp_start_drift; /**< Resampler drift absolute value */
+         int resamp_type; /**< Resampler mode (FIXME: redundant / resampling) */
++#ifdef RP_LEGACY
++        vlc_tick_t resamp_duration; /**< Media time awaiting a rate adjustment */
++#endif
+         bool discontinuity;
+     } sync;
+ 
+--- a/src/audio_output/dec.c
++++ b/src/audio_output/dec.c
+@@ -109,6 +109,9 @@
+ 
+     owner->sync.end = VLC_TICK_INVALID;
+     owner->sync.resamp_type = AOUT_RESAMPLING_NONE;
++#ifdef RP_LEGACY
++    owner->sync.resamp_duration = 0;
++#endif
+     owner->sync.discontinuity = true;
+     aout_OutputUnlock (p_aout);
+ 
+@@ -170,6 +173,9 @@
+         msg_Dbg (aout, "restarting filters...");
+         owner->sync.end = VLC_TICK_INVALID;
+         owner->sync.resamp_type = AOUT_RESAMPLING_NONE;
++#ifdef RP_LEGACY
++        owner->sync.resamp_duration = 0;
++#endif
+ 
+         if (owner->mixer_format.i_format)
+         {
+@@ -210,6 +216,9 @@
+     aout_owner_t *owner = aout_owner (aout);
+ 
+     owner->sync.resamp_type = AOUT_RESAMPLING_NONE;
++#ifdef RP_LEGACY
++    owner->sync.resamp_duration = 0;
++#endif
+     aout_FiltersAdjustResampling (owner->filters, 0);
+ }
+ 
+@@ -234,8 +243,11 @@
+ }
+ 
+ static void aout_DecSynchronize (audio_output_t *aout, vlc_tick_t dec_pts,
+-                                 int input_rate)
+-{
++                                 int input_rate, vlc_tick_t duration)
++{
++#ifndef RP_LEGACY
++    VLC_UNUSED(duration);
++#endif
+     aout_owner_t *owner = aout_owner (aout);
+     vlc_tick_t drift;
+ 
+@@ -312,6 +324,9 @@
+                   drift);
+         owner->sync.resamp_type = AOUT_RESAMPLING_UP;
+         owner->sync.resamp_start_drift = +drift;
++#ifdef RP_LEGACY
++        owner->sync.resamp_duration = 0;
++#endif
+     }
+     if (drift < -AOUT_MAX_PTS_ADVANCE
+      && owner->sync.resamp_type != AOUT_RESAMPLING_DOWN)
+@@ -320,6 +335,9 @@
+                   drift);
+         owner->sync.resamp_type = AOUT_RESAMPLING_DOWN;
+         owner->sync.resamp_start_drift = -drift;
++#ifdef RP_LEGACY
++        owner->sync.resamp_duration = 0;
++#endif
+     }
+ 
+     if (owner->sync.resamp_type == AOUT_RESAMPLING_NONE)
+@@ -344,11 +362,30 @@
+          * value, then it is time to switch back the resampling direction. */
+         adj *= -1;
+ 
++#ifdef RP_LEGACY
++    /* A fixed change per packet makes 2.5 ms Opus packets ramp eight times
++     * faster than 20 ms packets, producing an audible pitch sweep. Preserve
++     * the 2 Hz per 20 ms slope using decoded media duration. Retain fractional
++     * intervals across packets, but bound a discontinuous oversized block.
++     * Apply individual steps so returning towards zero cannot overshoot it. */
++    owner->sync.resamp_duration += __MIN(__MAX(duration, 0), CLOCK_FREQ);
++    while (owner->sync.resamp_duration >= 20000)
++    {
++        owner->sync.resamp_duration -= 20000;
++        if (aout_FiltersAdjustResampling(owner->filters, adj))
++            continue;
++        owner->sync.resamp_duration = 0;
++        owner->sync.resamp_type = AOUT_RESAMPLING_NONE;
++        msg_Dbg(aout, "resampling stopped (drift: %"PRId64" us)", drift);
++        break;
++    }
++#else
+     if (!aout_FiltersAdjustResampling (owner->filters, adj))
+     {   /* Everything is back to normal: stop resampling. */
+         owner->sync.resamp_type = AOUT_RESAMPLING_NONE;
+         msg_Dbg (aout, "resampling stopped (drift: %"PRId64" us)", drift);
+     }
++#endif
+ }
+ 
+ /*****************************************************************************
+@@ -402,7 +439,7 @@
+     aout_volume_Amplify (owner->volume, block);
+ 
+     /* Drift correction */
+-    aout_DecSynchronize (aout, block->i_pts, input_rate);
++    aout_DecSynchronize (aout, block->i_pts, input_rate, block->i_length);
+ 
+     /* Output */
+     owner->sync.end = block->i_pts + block->i_length + 1;
+--- a/modules/audio_output/waveout.c
++++ b/modules/audio_output/waveout.c
+@@ -42,6 +42,31 @@
+ 
+ #include "audio_output/windows_audio_common.h"
+ 
++#ifdef RP_LEGACY
++/* Win9x exports the Unicode query but does not implement it. Preserve the
++ * native Unicode path on NT and convert actual ANSI device data on Win9x. */
++static MMRESULT rp_wave_caps(UINT_PTR device, LPWAVEOUTCAPSW output, UINT size)
++{
++    WAVEOUTCAPSA caps;
++    MMRESULT result;
++    if (!(GetVersion() & 0x80000000UL))
++        return waveOutGetDevCapsW(device, output, size);
++    if (!output || size < sizeof(*output)) return MMSYSERR_INVALPARAM;
++    result = waveOutGetDevCapsA(device, &caps, sizeof(caps));
++    if (result != MMSYSERR_NOERROR) return result;
++    output->wMid = caps.wMid; output->wPid = caps.wPid;
++    output->vDriverVersion = caps.vDriverVersion;
++    output->dwFormats = caps.dwFormats; output->wChannels = caps.wChannels;
++    output->wReserved1 = caps.wReserved1; output->dwSupport = caps.dwSupport;
++    if (!MultiByteToWideChar(CP_ACP, 0, caps.szPname, -1,
++                            output->szPname, MAXPNAMELEN))
++        return MMSYSERR_ERROR;
++    return MMSYSERR_NOERROR;
++}
++#undef waveOutGetDevCaps
++#define waveOutGetDevCaps rp_wave_caps
++#endif
++
+ #define FRAME_SIZE 4096              /* The size is in samples, not in bytes */
+ 
+ /*****************************************************************************
+@@ -78,6 +103,7 @@
+                                  char ***, char *** );
+ static uint32_t findDeviceID(char *);
+ static int WaveOutTimeGet(audio_output_t * , vlc_tick_t *);
++static bool WaveOutMeasureLatency(audio_output_t *, const audio_sample_format_t *);
+ static void WaveOutFlush( audio_output_t *, bool);
+ static void WaveOutPause( audio_output_t *, bool, mtime_t);
+ static int WaveoutVolumeSet(audio_output_t * p_aout, float volume);
+@@ -101,6 +127,16 @@
+     WAVEFORMATEXTENSIBLE waveformat;                         /* audio format */
+ 
+     size_t i_frames;
++    unsigned rp_trace_count;
++    vlc_tick_t rp_trace_start;
++    bool b_start_pending;
++    vlc_tick_t i_start_date;
++    vlc_tick_t i_pause_date;
++    block_t *p_prebuffer;
++    vlc_tick_t i_prebuffer_length;
++    unsigned i_prebuffer_samples;
++    WAVEHDR latency_headers[16];
++    vlc_tick_t i_device_latency;
+ 
+     int i_repeat_counter;
+ 
+@@ -293,7 +329,11 @@
+         aout_FormatPrepare( fmt );
+         p_aout->sys->i_buffer_size = FRAME_SIZE * fmt->i_bytes_per_frame;
+ 
+-        if( waveoutcaps.dwSupport & WAVECAPS_VOLUME )
++        /* Some legacy wave mappers advertise volume but reject operations
++         * on the mapped stream. Keep functional software gain in that case. */
++        DWORD initial_volume;
++        if( (waveoutcaps.dwSupport & WAVECAPS_VOLUME) &&
++            waveOutGetVolume(p_aout->sys->h_waveout, &initial_volume) == MMSYSERR_NOERROR )
+         {
+             aout_GainRequest( p_aout, 1.0f );
+             p_aout->sys->b_soft = false;
+@@ -324,13 +364,131 @@
+             p_aout->sys->i_buffer_size );
+ 
+     /* Now we need to setup our waveOut play notification structure */
++    p_aout->sys->p_prebuffer = NULL;
++    p_aout->sys->i_prebuffer_length = 0;
++    p_aout->sys->i_prebuffer_samples = 0;
+     p_aout->sys->i_frames = 0;
++    p_aout->sys->rp_trace_count = 0;
+     p_aout->sys->i_played_length = 0;
++    p_aout->sys->i_start_date = VLC_TICK_INVALID;
++    p_aout->sys->i_pause_date = VLC_TICK_INVALID;
++    p_aout->sys->b_start_pending = waveOutPause(p_aout->sys->h_waveout) == MMSYSERR_NOERROR;
++    if( !p_aout->sys->b_start_pending )
++        msg_Warn(p_aout, "waveOutPause unavailable; startup prebuffering disabled");
+     p_aout->sys->p_free_list = NULL;
++    p_aout->sys->i_device_latency = 0;
++    memset(p_aout->sys->latency_headers, 0, sizeof(p_aout->sys->latency_headers));
++    /* AUDIONT can start a cold DMA ring immediately but resume a warm ring
++     * with render-ahead latency. The second probe measures the reset/restart
++     * path which the first real media block will use. */
++    if( p_aout->sys->b_start_pending && !p_aout->sys->b_spdif &&
++        WaveOutMeasureLatency(p_aout, fmt) )
++        WaveOutMeasureLatency(p_aout, fmt);
+ 
+     fmt->channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
+ 
+     return VLC_SUCCESS;
++}
++
++/* Legacy mixers may render silence tens of milliseconds ahead of the DMA
++ * cursor. Starting at the first PTS then makes the actual sound late and
++ * causes sustained pitch changes in the core's drift correction. Measure
++ * the opened device with silent PCM while input is still buffering. Never
++ * assume that HDA and Sound Blaster have the same startup latency. */
++static bool WaveOutMeasureLatency(audio_output_t *aout,
++                                  const audio_sample_format_t *fmt)
++{
++    aout_sys_t *sys = aout->sys;
++    /* Keep the render-ahead ring supplied while observing its first 40 ms.
++     * A single 100 ms probe can run dry with a 70 ms hardware lead, making
++     * its reset/restart latency unlike the later continuous media stream.
++     * Separate <=32 KiB headers also respect Win9x's 16-bit mapper. */
++    if (!fmt->i_bytes_per_frame) return false;
++    const unsigned frames = __MIN(fmt->i_rate / 10,
++                                  32768 / fmt->i_bytes_per_frame);
++    if (!frames) return false;
++    const unsigned target = fmt->i_rate / 4;
++    const unsigned count = target / frames + (target % frames != 0);
++    if (!count || count > ARRAY_SIZE(sys->latency_headers)) return false;
++    const size_t bytes = (size_t)frames * fmt->i_bytes_per_frame;
++    bool prepared[16] = { false };
++    bool queued = true, measured = false;
++    vlc_tick_t latency = INT64_MAX;
++    for (unsigned i = 0; i < count; ++i) {
++        WAVEHDR *header = &sys->latency_headers[i];
++        memset(header, 0, sizeof(*header));
++        header->lpData = calloc(1, bytes);
++        if (!header->lpData) { queued = false; break; }
++        header->dwBufferLength = bytes;
++        if (waveOutPrepareHeader(sys->h_waveout, header, sizeof(*header)) != MMSYSERR_NOERROR) {
++            queued = false; break;
++        }
++        prepared[i] = true;
++        if (waveOutWrite(sys->h_waveout, header, sizeof(*header)) != MMSYSERR_NOERROR) {
++            queued = false; break;
++        }
++    }
++    if (queued) {
++        const vlc_tick_t start = mdate();
++        if (waveOutRestart(sys->h_waveout) == MMSYSERR_NOERROR) {
++            for (;;) {
++                MMTIME pos;
++                pos.wType = TIME_SAMPLES;
++                if (waveOutGetPosition(sys->h_waveout, &pos, sizeof(pos)) != MMSYSERR_NOERROR ||
++                    pos.wType != TIME_SAMPLES) break;
++                vlc_tick_t elapsed = mdate() - start;
++                if (pos.u.sample >= fmt->i_rate / 100 && pos.u.sample < frames * count) {
++                    vlc_tick_t estimate = elapsed - (vlc_tick_t)pos.u.sample * CLOCK_FREQ / fmt->i_rate;
++                    if (estimate < latency) latency = estimate;
++                    measured = true;
++                }
++                if (pos.u.sample >= fmt->i_rate / 25 || elapsed >= 500 * 1000) break;
++                msleep(2 * 1000);
++            }
++        }
++    }
++    if (waveOutReset(sys->h_waveout) != MMSYSERR_NOERROR) measured = false;
++    for (unsigned i = 0; i < count; ++i) {
++        WAVEHDR *header = &sys->latency_headers[i];
++        if (!header->lpData) continue;
++        if (!prepared[i] || waveOutUnprepareHeader(sys->h_waveout, header, sizeof(*header)) == MMSYSERR_NOERROR) {
++            free(header->lpData);
++            header->lpData = NULL;
++        } else {
++            /* Keep driver-owned memory alive; Stop retries after its reset. */
++            measured = false;
++            msg_Warn(aout, "waveOut latency buffer remains prepared");
++        }
++    }
++    sys->b_start_pending = waveOutPause(sys->h_waveout) == MMSYSERR_NOERROR;
++    if( measured && sys->b_start_pending )
++    {
++        sys->i_device_latency = __MAX(latency, 0);
++        msg_Dbg(aout, "waveOut measured startup latency: %ld us", (long)sys->i_device_latency);
++    }
++    else msg_Warn(aout, "waveOut startup latency measurement unavailable");
++    return measured && sys->b_start_pending;
++}
++
++/* Called under the audio-output lock, after submission or during drain.
++ * Driver completion callbacks only take sys->lock, never this output lock. */
++static bool WaveOutStartQueued(audio_output_t *aout)
++{
++    aout_sys_t *sys = aout->sys;
++    if( !sys->b_start_pending || !sys->i_frames ) return true;
++    int canc = vlc_savecancel();
++    if( sys->i_start_date > VLC_TICK_INVALID )
++        mwait(sys->i_start_date - sys->i_device_latency);
++    MMRESULT result = waveOutRestart(sys->h_waveout);
++    vlc_restorecancel(canc);
++    sys->b_start_pending = false;
++    if( result != MMSYSERR_NOERROR )
++    {
++        msg_Err(aout, "waveOutRestart failed (%u)", result);
++        waveOutReset(sys->h_waveout);
++        return false;
++    }
++    return true;
+ }
+ 
+ /*****************************************************************************
+@@ -339,7 +497,7 @@
+  * This doesn't actually play the buffer. This just stores the buffer so it
+  * can be played by the callback thread.
+  *****************************************************************************/
+-static void Play( audio_output_t *p_aout, block_t *block )
++static void WaveOutSubmit( audio_output_t *p_aout, block_t *block )
+ {
+     struct lkwavehdr * p_waveheader =
+         (struct lkwavehdr *) malloc(sizeof(struct lkwavehdr));
+@@ -352,6 +510,25 @@
+     }
+ 
+     p_waveheader->p_next = NULL;
++    aout_sys_t *trace = p_aout->sys;
++    if( !trace->rp_trace_count ) trace->rp_trace_start = mdate();
++    if( trace->rp_trace_count++ < 12 )
++        msg_Dbg(p_aout, "wave startup block=%u elapsed_ms=%ld ahead_ms=%ld samples=%u queued=%u",
++                trace->rp_trace_count, (long)((mdate()-trace->rp_trace_start)/1000),
++                (long)((block->i_pts-mdate())/1000), block->i_nb_samples,
++                (unsigned)trace->i_frames);
++
++    aout_sys_t *sys = p_aout->sys;
++    if( !sys->i_played_length )
++    {
++        sys->i_start_date = block->i_pts;
++        if( !sys->b_start_pending )
++        {
++            int canc = vlc_savecancel();
++            mwait(block->i_pts);
++            vlc_restorecancel(canc);
++        }
++    }
+ 
+     if( block && p_aout->sys->chans_to_reorder )
+     {
+@@ -359,21 +536,82 @@
+                              p_aout->sys->chans_to_reorder,
+                              p_aout->sys->chan_table, p_aout->sys->format );
+     }
+-    while( PlayWaveOut( p_aout, p_aout->sys->h_waveout, p_waveheader, block,
+-                        p_aout->sys->b_spdif ) != VLC_SUCCESS )
+-
+-    {
+-        msg_Warn( p_aout, "Couldn't write frame... sleeping");
+-        msleep( block->i_length );
+-    }
+-
+-    WaveOutClean( p_aout->sys );
+-    WaveoutPollVolume( p_aout );
+-
++    /* A driver may complete a short buffer before waveOutWrite returns.
++     * Reserve the count before submission and never read the block after
++     * WaveOutClean can release it. */
+     vlc_mutex_lock( &p_aout->sys->lock );
++    /* WINAUDIO has 32 application-header slots. Limit outstanding writes
++     * before entering WinMM instead of repeatedly filling the driver's queue.
++     * Completion callbacks can wake this wait without taking the aout lock. */
++    while( p_aout->sys->i_frames >= 16 )
++        vlc_cond_wait( &p_aout->sys->cond, &p_aout->sys->lock );
+     p_aout->sys->i_frames++;
+     p_aout->sys->i_played_length += block->i_length;
+     vlc_mutex_unlock( &p_aout->sys->lock );
++    while( PlayWaveOut( p_aout, p_aout->sys->h_waveout, p_waveheader, block,
++                        p_aout->sys->b_spdif ) != VLC_SUCCESS )
++
++    {
++        msg_Warn( p_aout, "Couldn't write frame... sleeping");
++        msleep( block->i_length );
++    }
++
++    /* Start with enough queued PCM to cover a legacy driver's initial
++     * render-ahead (AUDIONT defaults to 60 ms). Waiting only after queuing
++     * 100 ms lets short codec packets accumulate before hardware starts. */
++    if( sys->b_start_pending &&
++        (sys->i_played_length >= 100 * 1000 || sys->i_frames >= 16) )
++        WaveOutStartQueued(p_aout);
++    WaveOutClean( p_aout->sys );
++    WaveoutPollVolume( p_aout );
++
++}
++
++/* Gather tiny codec packets before starting the paused device. Forty 2.5 ms
++ * Opus packets must not require forty driver queue entries to buffer 100 ms. */
++static block_t *WaveOutTakePrebuffer(audio_output_t *aout)
++{
++    aout_sys_t *sys = aout->sys;
++    block_t *chain = sys->p_prebuffer;
++    if( !chain ) return NULL;
++    unsigned samples = sys->i_prebuffer_samples;
++    sys->p_prebuffer = NULL;
++    sys->i_prebuffer_length = 0;
++    sys->i_prebuffer_samples = 0;
++    block_t *block = block_ChainGather(chain);
++    if( !block )
++    {
++        block_ChainRelease(chain);
++        msg_Err(aout, "cannot gather waveOut startup samples");
++    }
++    else block->i_nb_samples = samples;
++    return block;
++}
++
++static void WaveOutDiscardPrebuffer(aout_sys_t *sys)
++{
++    block_ChainRelease(sys->p_prebuffer);
++    sys->p_prebuffer = NULL;
++    sys->i_prebuffer_length = 0;
++    sys->i_prebuffer_samples = 0;
++}
++
++static void Play(audio_output_t *aout, block_t *block)
++{
++    aout_sys_t *sys = aout->sys;
++    /* Keep at least 20 ms per ordinary PCM write. Sixteen 2.5 ms headers
++     * provide only 40 ms of audio and can underrun a legacy driver's timer. */
++    const vlc_tick_t target = sys->b_start_pending ? 100 * 1000 : 20 * 1000;
++    if( !sys->b_spdif && (sys->p_prebuffer || block->i_length < target) )
++    {
++        sys->i_prebuffer_length += block->i_length;
++        sys->i_prebuffer_samples += block->i_nb_samples;
++        block_ChainAppend(&sys->p_prebuffer, block);
++        if( sys->i_prebuffer_length < target ) return;
++        block = WaveOutTakePrebuffer(aout);
++        if( !block ) return;
++    }
++    WaveOutSubmit(aout, block);
+ }
+ 
+ /*****************************************************************************
+@@ -382,6 +620,7 @@
+ static void Stop( audio_output_t *p_aout )
+ {
+     aout_sys_t *p_sys = p_aout->sys;
++    WaveOutDiscardPrebuffer(p_sys);
+ 
+     /* Before calling waveOutClose we must reset the device */
+     MMRESULT result = waveOutReset( p_sys->h_waveout );
+@@ -411,10 +650,21 @@
+     WaveOutFlush( p_aout, true );
+     WaveOutClean( p_aout->sys );
+ 
++    for (unsigned i = 0; i < ARRAY_SIZE(p_sys->latency_headers); ++i)
++        if (p_sys->latency_headers[i].lpData)
++            waveOutUnprepareHeader(p_sys->h_waveout, &p_sys->latency_headers[i],
++                                   sizeof(p_sys->latency_headers[i]));
+     /* now we can Close the device */
+     if( waveOutClose( p_sys->h_waveout ) != MMSYSERR_NOERROR )
+     {
+         msg_Err( p_aout, "waveOutClose failed" );
++    }
++    else
++    {
++        for (unsigned i = 0; i < ARRAY_SIZE(p_sys->latency_headers); ++i) {
++            free(p_sys->latency_headers[i].lpData);
++            p_sys->latency_headers[i].lpData = NULL;
++        }
+     }
+ 
+     free( p_sys->p_silence_buffer );
+@@ -628,7 +878,7 @@
+     result = waveOutPrepareHeader( h_waveout, &p_waveheader->hdr, sizeof(WAVEHDR) );
+     if( result != MMSYSERR_NOERROR )
+     {
+-        msg_Err( p_aout, "waveOutPrepareHeader failed" );
++        msg_Err( p_aout, "waveOutPrepareHeader failed (%u)", result );
+         return VLC_EGENERIC;
+     }
+ 
+@@ -636,7 +886,8 @@
+     result = waveOutWrite( h_waveout, &p_waveheader->hdr, sizeof(WAVEHDR) );
+     if( result != MMSYSERR_NOERROR )
+     {
+-        msg_Err( p_aout, "waveOutWrite failed" );
++        msg_Err( p_aout, "waveOutWrite failed (%u)", result );
++        waveOutUnprepareHeader(h_waveout, &p_waveheader->hdr, sizeof(WAVEHDR));
+         return VLC_EGENERIC;
+     }
+ 
+@@ -656,6 +907,10 @@
+     struct lkwavehdr * p_waveheader =  (struct lkwavehdr *) dwParam1;
+ 
+     if( uMsg != WOM_DONE ) return;
++    /* Calibration headers are not queued VLC blocks. Their addresses stay
++     * valid until waveOutClose drains driver callbacks. */
++    for (unsigned i = 0; i < ARRAY_SIZE(p_aout->sys->latency_headers); ++i)
++        if ((WAVEHDR *)dwParam1 == &p_aout->sys->latency_headers[i]) return;
+ 
+     vlc_mutex_lock( &p_aout->sys->lock );
+     p_waveheader->p_next = p_aout->sys->p_free_list;
+@@ -781,6 +1036,9 @@
+     if (unlikely(sys == NULL))
+         return VLC_ENOMEM;
+     aout->sys = sys;
++    /* LibVLC can set the volume before a media format opens the device. */
++    sys->h_waveout = NULL;
++    sys->b_soft = true;
+     aout->start = Start;
+     aout->stop = Stop;
+     aout->volume_set = WaveoutVolumeSet;
+@@ -845,7 +1103,7 @@
+     MMTIME mmtime;
+     mmtime.wType = TIME_SAMPLES;
+ 
+-    if( !p_aout->sys->i_frames )
++    if( p_aout->sys->b_start_pending || !p_aout->sys->i_frames )
+         return -1;
+ 
+     if( waveOutGetPosition( p_aout->sys->h_waveout, &mmtime, sizeof(MMTIME) )
+@@ -855,8 +1113,13 @@
+         return -1;
+     }
+ 
++    /* Until the first sample is heard, the sample cursor cannot describe
++     * how much device startup delay remains. Reporting only queued PCM here
++     * falsely tells the core that early restart means early audible sound. */
++    if( mmtime.wType != TIME_SAMPLES || mmtime.u.sample == 0 ) return -1;
++
+     vlc_tick_t i_pos = (vlc_tick_t) mmtime.u.sample * CLOCK_FREQ / p_aout->sys->i_rate;
+-    *delay = p_aout->sys->i_played_length - i_pos;
++    *delay = p_aout->sys->i_played_length + p_aout->sys->i_prebuffer_length - i_pos;
+     return 0;
+ }
+ 
+@@ -865,13 +1128,21 @@
+     MMRESULT res;
+     if( !wait )
+     {
++        WaveOutDiscardPrebuffer(p_aout->sys);
+         res  = waveOutReset( p_aout->sys->h_waveout );
+         p_aout->sys->i_played_length = 0;
++        p_aout->sys->i_start_date = VLC_TICK_INVALID;
++        p_aout->sys->i_pause_date = VLC_TICK_INVALID;
++        p_aout->sys->b_start_pending = waveOutPause(p_aout->sys->h_waveout) == MMSYSERR_NOERROR;
+         if( res != MMSYSERR_NOERROR )
+             msg_Err( p_aout, "waveOutReset failed");
+     }
+     else
+     {
++        /* A short clip may end before the startup threshold is reached. */
++        block_t *pending = WaveOutTakePrebuffer(p_aout);
++        if( pending ) WaveOutSubmit(p_aout, pending);
++        if( !WaveOutStartQueued(p_aout) ) return;
+         vlc_mutex_lock( &p_aout->sys->lock );
+         while( p_aout->sys->i_frames )
+         {
+@@ -884,9 +1155,10 @@
+ static void WaveOutPause( audio_output_t * p_aout, bool pause, vlc_tick_t date)
+ {
+     MMRESULT res;
+-    (void) date;
++    aout_sys_t *sys = p_aout->sys;
+     if(pause)
+     {
++        sys->i_pause_date = date;
+         vlc_timer_schedule( p_aout->sys->volume_poll_timer, false, 1, 200000 );
+         res = waveOutPause( p_aout->sys->h_waveout );
+         if( res != MMSYSERR_NOERROR )
+@@ -898,6 +1170,15 @@
+     else
+     {
+         vlc_timer_schedule( p_aout->sys->volume_poll_timer, false, 0, 0 );
++        if( sys->i_pause_date > VLC_TICK_INVALID )
++        {
++            if( sys->b_start_pending && sys->i_start_date > VLC_TICK_INVALID )
++                sys->i_start_date += date - sys->i_pause_date;
++            if( sys->p_prebuffer && sys->p_prebuffer->i_pts > VLC_TICK_INVALID )
++                sys->p_prebuffer->i_pts += date - sys->i_pause_date;
++        }
++        sys->i_pause_date = VLC_TICK_INVALID;
++        if( sys->b_start_pending ) return;
+         res = waveOutRestart( p_aout->sys->h_waveout );
+         if( res != MMSYSERR_NOERROR )
+         {
+@@ -992,6 +1273,9 @@
+     audio_output_t * p_aout = (audio_output_t *) aout;
+     uint32_t vol;
+ 
++    if (p_aout->sys->b_soft)
++        return;
++
+     MMRESULT r = waveOutGetVolume( p_aout->sys->h_waveout, (LPDWORD) &vol );
+ 
+     if( r != MMSYSERR_NOERROR )
+--- a/modules/codec/avcodec/audio.c
++++ b/modules/codec/avcodec/audio.c
+@@ -37,6 +37,7 @@
+ #include <vlc_avcodec.h>
+ 
+ #include "avcodec.h"
++#include "../../demux/xiph.h"
+ 
+ #include <libavcodec/avcodec.h>
+ #include <libavutil/mem.h>
+@@ -84,10 +85,27 @@
+ {
+     if( p_dec->fmt_in.i_extra > 0 )
+     {
+-        const uint8_t * const p_src = p_dec->fmt_in.p_extra;
++        const uint8_t *p_src = p_dec->fmt_in.p_extra;
+ 
+         int i_offset = 0;
+         int i_size = p_dec->fmt_in.i_extra;
++
++        /* VLC demuxers wrap OpusHead and OpusTags in Xiph lacing. FFmpeg
++         * expects only the raw OpusHead. Preserve raw headers and leave
++         * malformed data intact so the decoder rejects it normally. */
++        if( p_dec->fmt_in.i_codec == VLC_CODEC_OPUS && i_size > 8 &&
++            memcmp(p_src, "OpusHead", 8) )
++        {
++            unsigned sizes[XIPH_MAX_HEADER_COUNT], count;
++            const void *headers[XIPH_MAX_HEADER_COUNT];
++            if( !xiph_SplitHeaders(sizes, headers, &count, i_size, p_src) &&
++                count >= 1 && sizes[0] >= 19 &&
++                !memcmp(headers[0], "OpusHead", 8) )
++            {
++                p_src = headers[0];
++                i_size = sizes[0];
++            }
++        }
+ 
+         if( p_dec->fmt_in.i_codec == VLC_CODEC_ALAC )
+         {
+@@ -348,6 +366,15 @@
+         {
+             date_Set( &p_sys->end_date, VLC_TICK_INVALID );
+         }
++
++        /* The first Opus packet often has a negative timestamp covering
++         * pre-skip. It must reach the decoder to establish predictor state;
++         * libavcodec removes the pre-skip samples itself. Its first audible
++         * sample belongs at the beginning of the presentation timeline. */
++        if( p_sys->p_codec->id == AV_CODEC_ID_OPUS &&
++            date_Get(&p_sys->end_date) == VLC_TICK_INVALID &&
++            p_block->i_pts < VLC_TICK_INVALID )
++            date_Set(&p_sys->end_date, VLC_TICK_0);
+ 
+         /* We've just started the stream, wait for the first PTS. */
+         if( !date_Get( &p_sys->end_date ) && p_block->i_pts <= VLC_TICK_INVALID )
+--- a/modules/audio_filter/resampler/ugly.c
++++ b/modules/audio_filter/resampler/ugly.c
+@@ -39,6 +39,8 @@
+  *****************************************************************************/
+ static int Create (vlc_object_t *);
+ static int CreateResampler (vlc_object_t *);
++static void Close (vlc_object_t *);
++static void Flush (filter_t *);
+ 
+ static block_t *DoWork( filter_t *, block_t * );
+ 
+@@ -50,12 +52,19 @@
+     set_capability( "audio converter", 2 )
+     set_category( CAT_AUDIO )
+     set_subcategory( SUBCAT_AUDIO_RESAMPLER )
+-    set_callbacks( Create, NULL )
++    set_callbacks( Create, Close )
+ 
+     add_submodule()
+     set_capability( "audio resampler", 2 )
+-    set_callbacks( CreateResampler, NULL )
++    set_callbacks( CreateResampler, Close )
+ vlc_module_end ()
++
++struct filter_sys_t {
++    /* Source position of the next output sample, relative to the current
++     * input block, in units of 1/output_rate input samples. */
++    uint64_t phase;
++    unsigned output_rate;
++};
+ 
+ /*****************************************************************************
+  * Create: allocate ugly resampler
+@@ -75,27 +84,75 @@
+ 
+     if( p_filter->fmt_in.audio.i_format != p_filter->fmt_out.audio.i_format
+      || p_filter->fmt_in.audio.i_channels != p_filter->fmt_out.audio.i_channels
++     || !p_filter->fmt_in.audio.i_rate || !p_filter->fmt_out.audio.i_rate
+      || !AOUT_FMT_LINEAR( &p_filter->fmt_in.audio ) )
+         return VLC_EGENERIC;
+ 
++    p_filter->p_sys = calloc(1, sizeof(*p_filter->p_sys));
++    if (!p_filter->p_sys)
++        return VLC_ENOMEM;
++    p_filter->p_sys->output_rate = p_filter->fmt_out.audio.i_rate;
+     p_filter->pf_audio_filter = DoWork;
++    p_filter->pf_flush = Flush;
+     return VLC_SUCCESS;
+ }
+ 
++static void Close(vlc_object_t *obj)
++{
++    filter_t *filter = (filter_t *)obj;
++    free(filter->p_sys);
++}
++
++static void Flush(filter_t *filter)
++{
++    filter->p_sys->phase = 0;
++    filter->p_sys->output_rate = filter->fmt_out.audio.i_rate;
++}
++
+ /*****************************************************************************
+  * DoWork: convert a buffer
+  *****************************************************************************/
+ static block_t *DoWork( filter_t * p_filter, block_t * p_in_buf )
+ {
+-    /* Check if we really need to run the resampler */
+-    if( p_filter->fmt_out.audio.i_rate == p_filter->fmt_in.audio.i_rate )
+-        return p_in_buf;
+-
+-    block_t *p_out_buf = p_in_buf;
+-    unsigned int i_out_nb = p_in_buf->i_nb_samples
+-        * p_filter->fmt_out.audio.i_rate / p_filter->fmt_in.audio.i_rate;
++    filter_sys_t *sys = p_filter->p_sys;
++    const unsigned irate = p_filter->fmt_in.audio.i_rate;
++    const unsigned orate = p_filter->fmt_out.audio.i_rate;
+     const unsigned framesize = (p_filter->fmt_in.audio.i_bitspersample / 8)
+         * aout_FormatNbChannels( &p_filter->fmt_in.audio );
++    if (!irate || !orate || !framesize ||
++        p_in_buf->i_nb_samples > p_in_buf->i_buffer / framesize) {
++        block_Release(p_in_buf);
++        return NULL;
++    }
++    if (p_in_buf->i_flags & BLOCK_FLAG_DISCONTINUITY)
++        Flush(p_filter);
++    uint64_t phase = sys->phase;
++    if (orate != sys->output_rate) {
++        /* Preserve the source position when the output clock rate changes.
++         * Splitting the product avoids overflow for extreme valid rates. */
++        phase = phase / sys->output_rate * orate +
++                phase % sys->output_rate * orate / sys->output_rate;
++        sys->output_rate = orate;
++    }
++    if (irate == orate && phase == 0)
++        return p_in_buf;
++
++    const uint64_t end = (uint64_t)p_in_buf->i_nb_samples * orate;
++    const uint64_t i_out_count = phase < end ? (end - phase - 1) / irate + 1 : 0;
++    if( i_out_count > UINT_MAX ||
++        i_out_count > SIZE_MAX / framesize )
++    {
++        block_Release( p_in_buf );
++        return NULL;
++    }
++    unsigned int i_out_nb = i_out_count;
++    sys->phase = phase + i_out_count * irate - end;
++    if (!i_out_nb) {
++        block_Release(p_in_buf);
++        return NULL;
++    }
++
++    block_t *p_out_buf = p_in_buf;
+ 
+     if( p_filter->fmt_out.audio.i_rate > p_filter->fmt_in.audio.i_rate )
+     {
+@@ -106,27 +163,34 @@
+ 
+     unsigned char *p_out = p_out_buf->p_buffer;
+     unsigned char *p_in = p_in_buf->p_buffer;
+-    unsigned int i_remainder = 0;
+ 
+     p_out_buf->i_nb_samples = i_out_nb;
+     p_out_buf->i_buffer = i_out_nb * framesize;
+     p_out_buf->i_pts = p_in_buf->i_pts;
+-    p_out_buf->i_length = p_out_buf->i_nb_samples *
+-        1000000 / p_filter->fmt_out.audio.i_rate;
+-
++    p_out_buf->i_length = (mtime_t)p_out_buf->i_nb_samples *
++        CLOCK_FREQ / p_filter->fmt_out.audio.i_rate;
++
++    /* Divide once per block. A 64-bit division for each PCM frame is costly
++     * on i386 and can make a clock correction itself exhaust the queue.
++     * The quotient/remainder step emits exactly floor(phase / orate). */
++    size_t source_index = phase / orate;
++    unsigned remainder = phase % orate;
++    const unsigned advance = irate / orate;
++    const unsigned fraction = irate % orate;
+     while( i_out_nb )
+     {
++        p_in = p_in_buf->p_buffer + source_index * framesize;
+         if( p_out != p_in )
+             memcpy( p_out, p_in, framesize );
+         p_out += framesize;
+         i_out_nb--;
+ 
+-        i_remainder += p_filter->fmt_in.audio.i_rate;
+-        while( i_remainder >= p_filter->fmt_out.audio.i_rate )
+-        {
+-            p_in += framesize;
+-            i_remainder -= p_filter->fmt_out.audio.i_rate;
+-        }
++        source_index += advance;
++        /* Subtract before adding so the sum cannot overflow unsigned. */
++        if (remainder >= orate - fraction) {
++            remainder -= orate - fraction;
++            source_index++;
++        } else remainder += fraction;
+     }
+ 
+     if( p_in_buf != p_out_buf )
+--- a/modules/audio_filter/resampler/speex.c
++++ b/modules/audio_filter/resampler/speex.c
+@@ -67,7 +67,8 @@
+     if (filter->fmt_in.audio.i_format != filter->fmt_out.audio.i_format
+     /* Cannot remix */
+      || filter->fmt_in.audio.i_channels != filter->fmt_out.audio.i_channels
+-     || filter->fmt_in.audio.i_physical_channels == 0 )
++     || filter->fmt_in.audio.i_physical_channels == 0
++     || !filter->fmt_in.audio.i_rate || !filter->fmt_out.audio.i_rate )
+         return VLC_EGENERIC;
+ 
+     switch (filter->fmt_in.audio.i_format)
+@@ -126,6 +127,9 @@
+     const unsigned irate = filter->fmt_in.audio.i_rate;
+     const unsigned orate = filter->fmt_out.audio.i_rate;
+ 
++    if( !framesize || !irate || !orate )
++        goto error;
++
+     if( speex_resampler_set_rate (st, irate, orate) != RESAMPLER_ERR_SUCCESS )
+         goto error;
+ 
+--- a/modules/demux/ogg.c
++++ b/modules/demux/ogg.c
+@@ -449,6 +449,7 @@
+ 
+         const int i_page_packets = ogg_page_packets( &p_sys->current_page );
+         bool b_doprepcr = false;
++        const bool b_start = p_stream->i_previous_granulepos <= 0 && !p_stream->b_reinit;
+ 
+         if ( p_stream->i_pcr < VLC_TICK_0 && ogg_page_granulepos( &p_sys->current_page ) > 0 )
+         {
+@@ -542,6 +543,7 @@
+ #ifdef HAVE_LIBVORBIS
+             int i_prev_blocksize = 0;
+ #endif
++            ogg_int64_t total_samples = 0;
+             // PASS 1
+             for( int i=0; i<p_stream->prepcr.i_used; i++ )
+             {
+@@ -557,7 +559,7 @@
+                             p_stream->special.speex.i_framesperpacket;
+                     break;
+                 case VLC_CODEC_OPUS:
+-                    p_block->i_nb_samples = Ogg_OpusPacketDuration( &dumb_packet );
++                    /* Keep the pre-skip already applied to i_nb_samples. */
+                     break;
+ #ifdef HAVE_LIBVORBIS
+                 case VLC_CODEC_VORBIS:
+@@ -572,14 +574,28 @@
+                     if ( i_prev_blocksize )
+                         p_block->i_nb_samples = ( i_blocksize + i_prev_blocksize ) / 4;
+                     else
+-                        p_block->i_nb_samples = i_blocksize / 2;
++                        p_block->i_nb_samples = b_start ? 0 : i_blocksize / 2;
+                     i_prev_blocksize = i_blocksize;
+                 }
+ #endif
+                 }
+             }
+ 
++            for( int i = 0; i < p_stream->prepcr.i_used; ++i )
++            {
++                block_t *block = p_stream->prepcr.pp_blocks[i];
++                total_samples += p_stream->fmt.i_codec == VLC_CODEC_OPUS
++                    ? opus_frame_duration(block->p_buffer, block->i_buffer) : block->i_nb_samples;
++            }
++#ifdef HAVE_LIBVORBIS
++            if( p_stream->fmt.i_codec == VLC_CODEC_VORBIS )
++                p_stream->special.vorbis.i_prev_blocksize = i_prev_blocksize;
++#endif
+             // PASS 2
++            const ogg_int64_t page_end = ogg_page_granulepos(&p_sys->current_page);
++            const bool first_eos = b_start && ogg_page_eos(&p_sys->current_page) &&
++                (p_stream->fmt.i_codec == VLC_CODEC_OPUS || p_stream->fmt.i_codec == VLC_CODEC_VORBIS);
++            ogg_int64_t samplepos = first_eos ? __MAX(total_samples, page_end) : page_end;
+             bool b_fixed = false;
+             for( int i=p_stream->prepcr.i_used - 1; i>=0; i-- )
+             {
+@@ -589,15 +605,34 @@
+                 case VLC_CODEC_SPEEX:
+                 case VLC_CODEC_OPUS:
+                 case VLC_CODEC_VORBIS:
+-                    pagestamp -= CLOCK_FREQ * p_block->i_nb_samples / p_stream->f_rate;
+-                    if ( pagestamp < 0 )
++                {
++                    unsigned duration = p_block->i_nb_samples;
++                    if( p_stream->fmt.i_codec == VLC_CODEC_OPUS )
++                        duration = opus_frame_duration(p_block->p_buffer, p_block->i_buffer);
++                    samplepos -= duration;
++                    if( first_eos && duration && page_end < samplepos + duration )
+                     {
+-                        p_block->i_pts = VLC_TICK_INVALID;
+-                        if( p_sys->i_nzpcr_offset == 0 ) /* not on chained streams */
++                        if( page_end <= samplepos )
+                             p_block->i_flags |= BLOCK_FLAG_PREROLL;
++                        else
++                            p_block->i_length = (page_end - samplepos) * CLOCK_FREQ / p_stream->f_rate;
+                     }
+-                    else
+-                        p_block->i_pts = VLC_TICK_0 + p_sys->i_nzpcr_offset + pagestamp;
++                    /* Accumulate integer samples, not rounded packet times.
++                     * Rounding every Vorbis block can turn time zero negative
++                     * and incorrectly mark the first audible block as preroll. */
++                    pagestamp = (samplepos - p_stream->i_pre_skip) * CLOCK_FREQ / p_stream->f_rate;
++                    /* Priming packets still have to reach the decoder. The
++                     * first audible Opus packet can straddle time zero. */
++                    p_block->i_pts = VLC_TICK_0 + p_sys->i_nzpcr_offset + __MAX(0, pagestamp);
++                    /* Speex's first packet includes encoder lookahead and
++                     * audible samples. Do not discard its entire decoded
++                     * frame group because the granule-derived start is
++                     * slightly negative (or because the final group pads). */
++                    if( pagestamp < 0 && p_stream->fmt.i_codec != VLC_CODEC_OPUS &&
++                        p_stream->fmt.i_codec != VLC_CODEC_SPEEX &&
++                        p_sys->i_nzpcr_offset == 0 )
++                        p_block->i_flags |= BLOCK_FLAG_PREROLL;
++                }
+                     b_fixed = true;
+                     break;
+                 default:
+@@ -1046,13 +1081,10 @@
+                 (p_stream->fmt.i_codec == VLC_CODEC_OPUS ||
+                  p_stream->fmt.i_codec == VLC_CODEC_VORBIS) )
+             {
+-                unsigned duration = Ogg_OpusPacketDuration( p_oggpacket );
+-                if( duration > 0 && p_stream->f_rate &&
+-                    p_oggpacket->granulepos > sample )
++                if( p_stream->f_rate && p_oggpacket->granulepos > sample )
+                 {
+                     ogg_int64_t samples = p_oggpacket->granulepos - sample;
+-                    if( samples < duration )
+-                        p_stream->i_end_length = samples * CLOCK_FREQ / p_stream->f_rate;
++                    p_stream->i_end_length = samples * CLOCK_FREQ / p_stream->f_rate;
+                 }
+             }
+ 
+@@ -1153,8 +1185,7 @@
+                                    block_t *p_block )
+ {
+     demux_sys_t *p_ogg = p_demux->p_sys;
+-    if ( (!p_stream->p_es || p_stream->prepcr.pp_blocks || p_stream->i_pcr == VLC_TS_UNKNOWN) &&
+-         p_ogg->i_nzpcr_offset == 0 /* Not on chained streams */ )
++    if ( !p_stream->p_es || p_stream->prepcr.pp_blocks || p_stream->i_pcr == VLC_TS_UNKNOWN )
+     {
+         if ( !p_block ) return;
+         if ( p_stream->prepcr.pp_blocks )
+@@ -1429,8 +1460,7 @@
+         {
+             if( p_stream->i_skip_frames >= p_block->i_nb_samples )
+             {
+-                if( p_demux->p_sys->i_nzpcr_offset == 0 ) /* not on chained streams */
+-                    p_block->i_flags |= BLOCK_FLAG_PREROLL;
++                p_block->i_flags |= BLOCK_FLAG_PREROLL;
+                 p_stream->i_skip_frames -= p_block->i_nb_samples;
+                 p_block->i_nb_samples = 0;
+             }
+@@ -2885,12 +2915,8 @@
+     p_stream->fmt.audio.i_channels = oggpack_read( &opb, 8 );
+     fill_channels_info(&p_stream->fmt.audio);
+     p_stream->i_pre_skip = oggpack_read( &opb, 16 );
+-    /* For Opus, trash the first 80 ms of decoded output as
+-           well, to avoid blowing out speakers if we get unlucky.
+-           Opus predicts content from prior frames, which can go
+-           badly if we seek right where the stream goes from very
+-           quiet to very loud. It will converge after a bit. */
+-    p_stream->i_pre_skip = __MAX( 80*48, p_stream->i_pre_skip );
++    /* Header pre-skip is encoder delay. Seek preroll must not enlarge it
++     * or alter the granule-position time base at the beginning of a file. */
+ }
+ 
+ static bool Ogg_ReadFlacStreamInfo( demux_t *p_demux, logical_stream_t *p_stream,
+--- a/modules/demux/mp4/mp4.c
++++ b/modules/demux/mp4/mp4.c
+@@ -443,6 +443,27 @@
+     *pi_delta = MP4_rescale_mtime( delta, p_track->i_timescale );
+     return true;
+ }
++
++#ifdef RP_LEGACY
++/* Apply the edit to composition time before clamping to the movie origin.
++ * Edited B-frame streams can have a negative decode time but a valid zero
++ * presentation time. Adding CTTS to the already clamped DTS delays those
++ * opening pictures by the edit's media offset. Keep the decoder's existing
++ * nonnegative DTS separately from this presentation timestamp. */
++static inline bool MP4_TrackGetPTS( demux_t *p_demux, const mp4_track_t *track,
++                                   vlc_tick_t *pts )
++{
++    const mp4_chunk_t *chunk = &track->chunk[track->i_chunk];
++    const uint32_t sample = track->i_sample - chunk->i_sample_first;
++    stime_t delta;
++    if( !MP4_ChunkGetSampleCTSDelta( chunk, sample, &delta ) )
++        return false;
++    stime_t time = MP4_ChunkGetSampleDTS( chunk, sample ) + delta;
++    MP4_TrackTimeApplyELST( track, p_demux->p_sys->i_timescale, &time );
++    *pts = VLC_TICK_0 + MP4_rescale_mtime( time, track->i_timescale );
++    return true;
++}
++#endif
+ 
+ static inline mtime_t MP4_GetSamplesDuration( demux_t *p_demux, mp4_track_t *p_track,
+                                               unsigned i_nb_samples )
+@@ -1415,8 +1436,13 @@
+             /* dts */
+             p_block->i_dts = VLC_TICK_0 + i_current_nzdts;
+             /* pts */
++#ifdef RP_LEGACY
++            if( MP4_TrackGetPTS( p_demux, tk, &i_delta ) )
++                p_block->i_pts = i_delta;
++#else
+             if( MP4_TrackGetPTSDelta( p_demux, tk, &i_delta ) )
+                 p_block->i_pts = p_block->i_dts + i_delta;
++#endif
+             else if( tk->fmt.i_cat != VIDEO_ES )
+                 p_block->i_pts = p_block->i_dts;
+             else
+--- a/modules/demux/avformat/demux.c
++++ b/modules/demux/avformat/demux.c
+@@ -43,6 +43,7 @@
+ #include "../../codec/avcodec/avcommon_compat.h"
+ #include "avformat.h"
+ #include "../xiph.h"
++#include "../opus.h"
+ #include "../vobsub.h"
+ 
+ #include <libavformat/avformat.h>
+@@ -62,6 +63,7 @@
+ {
+     es_out_id_t *p_es;
+     vlc_tick_t i_pcr;
++    unsigned opus_skip;
+ };
+ 
+ /*****************************************************************************
+@@ -896,6 +898,37 @@
+             p_stream->time_base.num /
+             p_stream->time_base.den;
+ 
++    if( p_stream->codecpar->codec_id == AV_CODEC_ID_OPUS )
++    {
++        unsigned duration = opus_frame_duration(pkt.data, pkt.size);
++        size_t side_size = 0;
++        const uint8_t *side = av_packet_get_side_data(&pkt, AV_PKT_DATA_SKIP_SAMPLES, &side_size);
++        unsigned discard = 0;
++        if( side && side_size >= 10 )
++        {
++            unsigned skip = GetDWLE(side);
++            if( skip ) p_track->opus_skip = skip;
++            discard = GetDWLE(side + 4);
++        }
++        if( duration )
++        {
++            unsigned skip = __MIN(p_track->opus_skip, duration);
++            p_track->opus_skip -= skip;
++            p_frame->i_nb_samples = duration - skip;
++            if( skip == duration || discard >= duration - skip )
++                p_frame->i_flags |= BLOCK_FLAG_PREROLL;
++            discard = __MIN(discard, duration);
++            /* Opus decoder interprets length as the packet duration after
++             * end padding, and i_nb_samples as duration after start padding. */
++            p_frame->i_length = (vlc_tick_t)(duration - discard) * CLOCK_FREQ / 48000;
++            if( p_frame->i_pts != VLC_TICK_INVALID )
++                p_frame->i_pts += (vlc_tick_t)skip * CLOCK_FREQ / 48000;
++            if( p_frame->i_pts <= VLC_TICK_INVALID )
++                p_frame->i_pts = VLC_TICK_0;
++            p_frame->i_dts = p_frame->i_pts;
++        }
++    }
++
+     /* Add here notoriously bugged file formats/samples */
+     if( !strcmp( p_sys->fmt->name, "flv" ) )
+     {
+@@ -987,7 +1020,14 @@
+ 
+     p_sys->i_pcr = i_time;
+     for( unsigned i = 0; i < p_sys->i_tracks; i++ )
++    {
+         p_sys->tracks[i].i_pcr = VLC_TICK_INVALID;
++        p_sys->tracks[i].opus_skip = 0;
++        const AVCodecParameters *cp = p_sys->ic->streams[i]->codecpar;
++        if( i_time == VLC_TICK_0 && cp->codec_id == AV_CODEC_ID_OPUS &&
++            cp->extradata_size >= 19 && !memcmp(cp->extradata, "OpusHead", 8) )
++            p_sys->tracks[i].opus_skip = GetWLE(cp->extradata + 10);
++    }
+ 
+     if( i_time > VLC_TICK_INVALID )
+     {
+--- a/modules/demux/asf/asf.c
++++ b/modules/demux/asf/asf.c
+@@ -238,12 +238,14 @@
+             else
+             {
+                 p_sys->b_eof = true;
+-                for ( int i=0; i<MAX_ASF_TRACKS; i++ )
+-                {
+-                    asf_track_t *tk = p_sys->track[i];
+-                    if ( tk && tk->info.p_frame )
+-                        Packet_Enqueue( &p_sys->packet_sys, i, &tk->info.p_frame );
+-                }
++            }
++            /* A trailing index or concatenated header is not packet payload.
++             * Flush the final assembled frame at every data-object boundary. */
++            for ( int i=0; i<MAX_ASF_TRACKS; i++ )
++            {
++                asf_track_t *tk = p_sys->track[i];
++                if ( tk && tk->info.p_frame )
++                    Packet_Enqueue( &p_sys->packet_sys, i, &tk->info.p_frame );
+             }
+         }
+ 
+--- a/modules/demux/mpeg/ts.c
++++ b/modules/demux/mpeg/ts.c
+@@ -202,6 +202,7 @@
+ static void ReadyQueuesPostSeek( demux_t *p_demux );
+ static void PCRHandle( demux_t *p_demux, ts_pid_t *, ts_90khz_t );
+ static void PCRFixHandle( demux_t *, ts_pmt_t *, block_t * );
++static void PESDataChainHandle( vlc_object_t *, void *, block_t *, ts_90khz_t );
+ 
+ #define TS_PACKET_SIZE_188 188
+ #define TS_PACKET_SIZE_192 192
+@@ -643,7 +644,26 @@
+         block_t     *p_pkt;
+         if( !(p_pkt = ReadTSPacket( p_demux )) )
+         {
+-            return VLC_DEMUXER_EOF;
++            /* An unbounded video PES normally ends at the next payload start.
++             * At file EOF no next packet arrives: deliver its final access unit
++             * before the decoder's drain, rather than losing the last frame. */
++            bool drained = false;
++            ts_pid_next_context_t context = ts_pid_NextContextInitValue;
++            ts_pid_t *pid;
++            while( (pid = ts_pid_Next(&p_sys->pids, &context)) != NULL )
++            {
++                if( pid->type != TYPE_STREAM || SCRAMBLED(*pid) ||
++                    pid->u.p_stream->transport != TS_TRANSPORT_PES )
++                    continue;
++                ts_stream_t *pes = pid->u.p_stream;
++                if( pes->gather.i_data_size &&
++                    pes->gather.i_gathered < pes->gather.i_data_size )
++                    continue; /* A truncated, explicitly sized PES is incomplete. */
++                ts_pes_parse_callback cb = { .p_obj = VLC_OBJECT(p_demux),
++                    .priv = pid, .pf_parse = PESDataChainHandle };
++                drained |= ts_pes_Drain(&cb, pes);
++            }
++            return drained ? VLC_DEMUXER_SUCCESS : VLC_DEMUXER_EOF;
+         }
+ 
+         if( p_sys->b_start_record )
+--- a/modules/codec/opus.c
++++ b/modules/codec/opus.c
+@@ -571,10 +571,12 @@
+     if(!i_nb_samples)
+         i_nb_samples = spp;
+ 
+-    int i_duration_samples = ((i_duration + (CLOCK_FREQ / 48000)) * 48000)
+-                             / CLOCK_FREQ;
++    if( i_nb_samples < 0 || i_nb_samples > spp )
++        return NULL;
++    int i_duration_samples = i_duration > 0 && i_duration <= 120000
++        ? (i_duration * 48000 + CLOCK_FREQ / 2) / CLOCK_FREQ : 0;
+     int i_end_trim;
+-    if(i_duration_samples && i_duration_samples < i_nb_samples)
++    if(i_duration_samples && i_duration_samples < spp)
+     {
+         i_end_trim = spp - i_duration_samples;
+         msg_Dbg(p_dec, "truncating %d off %d samples", i_end_trim, i_nb_samples);
+--- a/modules/codec/vorbis.c
++++ b/modules/codec/vorbis.c
+@@ -505,6 +505,17 @@
+     else
+     {
+         block_t *p_aout_buffer = DecodePacket( p_dec, p_oggpacket );
++        if( p_aout_buffer && p_block->i_length > 0 )
++        {
++            unsigned keep = (p_block->i_length * p_sys->vi.rate + CLOCK_FREQ / 2) / CLOCK_FREQ;
++            if( keep < p_aout_buffer->i_nb_samples )
++            {
++                p_aout_buffer->i_nb_samples = keep;
++                p_aout_buffer->i_buffer = keep * p_sys->vi.channels * sizeof(INTERLEAVE_TYPE);
++                p_aout_buffer->i_length = p_block->i_length;
++                date_Set(&p_sys->end_date, p_aout_buffer->i_pts + p_block->i_length);
++            }
++        }
+         if( p_block )
+             block_Release( p_block );
+         return p_aout_buffer;
+--- a/modules/text_renderer/Makefile.am
++++ b/modules/text_renderer/Makefile.am
+@@ -12,6 +12,10 @@
+ libfreetype_plugin_la_LIBADD = $(AM_LIBADD) $(LIBM)
+ libfreetype_plugin_la_LDFLAGS = $(FREETYPE_LDFLAGS) -rpath '$(textdir)'
+ 
++if HAVE_RETRO
++libfreetype_plugin_la_SOURCES += text_renderer/freetype/fonts/RPFONTS.c
++libfreetype_plugin_la_LINK = $(CXXLINK)
++else
+ if HAVE_WIN32
+ libfreetype_plugin_la_SOURCES += text_renderer/freetype/fonts/dwrite.cpp
+ libfreetype_plugin_la_LINK = $(CXXLINK)
+@@ -23,6 +27,7 @@
+ endif
+ else
+ libfreetype_plugin_la_LINK = $(LINK)
++endif
+ endif
+ if HAVE_FONTCONFIG
+ libfreetype_plugin_la_SOURCES += text_renderer/freetype/fonts/fontconfig.c
+--- a/modules/text_renderer/freetype/freetype.c
++++ b/modules/text_renderer/freetype/freetype.c
+@@ -1443,6 +1443,11 @@
+     p_sys->pf_select = Generic_Select;
+     p_sys->pf_get_family = CoreText_GetFamily;
+     p_sys->pf_get_fallbacks = CoreText_GetFallbacks;
++#elif defined(RP_LEGACY)
++    p_sys->pf_select = Generic_Select;
++    p_sys->pf_get_family = RPFonts_GetFamily;
++    p_sys->pf_get_fallbacks = RPFonts_GetFallbacks;
++    if(RPFonts_Prepare(p_filter)!=VLC_SUCCESS) goto error;
+ #elif defined( _WIN32 )
+     if( InitDWrite( p_filter ) == VLC_SUCCESS )
+     {
+@@ -1545,7 +1550,7 @@
+     if( p_sys->p_face != NULL )
+         FontConfig_Unprepare();
+ 
+-#elif defined( _WIN32 )
++#elif defined( _WIN32 ) && !defined(RP_LEGACY)
+     if( p_sys->pf_get_family == DWrite_GetFamily )
+         ReleaseDWrite( p_filter );
+ #endif
+--- a/modules/text_renderer/freetype/platform_fonts.c
++++ b/modules/text_renderer/freetype/platform_fonts.c
+@@ -85,7 +85,7 @@
+         }
+     }
+ 
+-#if defined( _WIN32 )
++#if defined( _WIN32 ) && !defined(RP_LEGACY)
+     else if( !memcmp( psz_fontfile, ":dw/", 4 ) )
+     {
+         int i_index = atoi( psz_fontfile + 4 );
+--- a/modules/text_renderer/freetype/platform_fonts.h
++++ b/modules/text_renderer/freetype/platform_fonts.h
+@@ -57,6 +57,11 @@
+ # define SYSTEM_DEFAULT_FAMILY "Helvetica Neue"
+ # define SYSTEM_DEFAULT_MONOSPACE_FONT_FILE "/System/Library/Fonts/Monaco.dfont"
+ # define SYSTEM_DEFAULT_MONOSPACE_FAMILY "Monaco"
++#elif defined(RP_LEGACY)
++# define SYSTEM_DEFAULT_FONT_FILE "DEJAVU.TTF"
++# define SYSTEM_DEFAULT_FAMILY "DejaVu Sans"
++# define SYSTEM_DEFAULT_MONOSPACE_FONT_FILE "DEJAVU.TTF"
++# define SYSTEM_DEFAULT_MONOSPACE_FAMILY "DejaVu Sans"
+ #elif defined( _WIN32 )
+ # define SYSTEM_DEFAULT_FONT_FILE "arial.ttf" /* Default path font found at run-time */
+ # define SYSTEM_DEFAULT_FAMILY "Arial"
+@@ -148,6 +153,11 @@
+ void FontConfig_Unprepare( void );
+ #endif /* FONTCONFIG */
+ 
++#ifdef RP_LEGACY
++int RPFonts_Prepare(filter_t *);
++const vlc_family_t *RPFonts_GetFamily(filter_t *,const char *);
++vlc_family_t *RPFonts_GetFallbacks(filter_t *,const char *,uni_char_t);
++#endif
+ #if defined( _WIN32 )
+ const vlc_family_t *DWrite_GetFamily( filter_t *p_filter, const char *psz_family );
+ vlc_family_t *DWrite_GetFallbacks( filter_t *p_filter, const char *psz_family,
+--- /dev/null
++++ b/modules/text_renderer/freetype/fonts/RPFONTS.c
+@@ -0,0 +1,99 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * Font discovery through FreeType on Windows versions without DirectWrite or
++ * Uniscribe. HarfBuzz performs shaping; this file discovers faces/fallbacks.
++ */
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++#include <vlc_common.h>
++#include <vlc_filter.h>
++#include <vlc_charset.h>
++#include <vlc_fs.h>
++#include <windows.h>
++#include <dirent.h>
++#include "../platform_fonts.h"
++
++static char *AppFont(const char *name)
++{
++    if(strchr(name,'\\') || strchr(name,'/') || strchr(name,':')) return strdup(name);
++    wchar_t path[MAX_PATH];
++    DWORD length=GetModuleFileNameW(GetModuleHandleA("LIBCORE.DLL"),path,MAX_PATH);
++    if(!length || length>=MAX_PATH) return NULL;
++    wchar_t *last=wcsrchr(path,L'\\');if(!last) return NULL;last[1]=0;
++    char *folder=FromWide(path),*result=NULL;
++    if(folder) { if(asprintf(&result,"%s%s",folder,name)<0) result=NULL;free(folder); }
++    return result;
++}
++static void AddFile(filter_t *filter,const char *path)
++{
++    filter_sys_t *sys=filter->p_sys;
++    FT_Face face;
++    if(FT_New_Face(sys->p_library,path,0,&face)) return;
++    FT_Long count=face->num_faces;
++    for(FT_Long index=0;index<count;++index) {
++        if(index && FT_New_Face(sys->p_library,path,index,&face)) continue;
++        if(face->family_name) {
++            char *key=ToLower(face->family_name);
++            if(key) {
++                vlc_family_t *family=vlc_dictionary_value_for_key(&sys->family_map,key);
++                if(!family) family=NewFamily(filter,face->family_name,&sys->p_families,&sys->family_map,key);
++                if(family) {
++                    char *copy=strdup(path);
++                    if(copy) NewFont(copy,index,!!(face->style_flags&FT_STYLE_FLAG_BOLD),
++                                    !!(face->style_flags&FT_STYLE_FLAG_ITALIC),family);
++                }
++                free(key);
++            }
++        }
++        FT_Done_Face(face);
++    }
++}
++static void AddDirectory(filter_t *filter,const char *folder)
++{
++    DIR *directory=vlc_opendir(folder);if(!directory) return;
++    const char *name;
++    while((name=vlc_readdir(directory))!=NULL) {
++        const char *ext=strrchr(name,'.');
++        if(!ext || (strcasecmp(ext,".ttf") && strcasecmp(ext,".ttc") &&
++                    strcasecmp(ext,".otf") && strcasecmp(ext,".fon"))) continue;
++        char *path;
++        if(asprintf(&path,"%s\\%s",folder,name)<0) continue;
++        AddFile(filter,path);free(path);
++    }
++    closedir(directory);
++}
++int RPFonts_Prepare(filter_t *filter)
++{
++    char *app=AppFont("DEJAVU.TTF");
++    if(app) { AddFile(filter,app);free(app); }
++    char windows[MAX_PATH],system[MAX_PATH];
++    UINT n=GetWindowsDirectoryA(windows,MAX_PATH);
++    if(n && n<MAX_PATH-7) {
++        strcat(windows,"\\FONTS");
++        char *folder=FromLocaleDup(windows);
++        if(folder) { AddDirectory(filter,folder);free(folder); }
++    }
++    n=GetSystemDirectoryA(system,MAX_PATH);
++    if(n && n<MAX_PATH) {
++        char *folder=FromLocaleDup(system);
++        if(folder) { AddDirectory(filter,folder);free(folder); }
++    }
++    return filter->p_sys->p_families ? VLC_SUCCESS : VLC_EGENERIC;
++}
++const vlc_family_t *RPFonts_GetFamily(filter_t *filter,const char *name)
++{
++    char *key=ToLower(name);if(!key) return NULL;
++    const vlc_family_t *family=vlc_dictionary_value_for_key(&filter->p_sys->family_map,key);
++    free(key);return family;
++}
++vlc_family_t *RPFonts_GetFallbacks(filter_t *filter,const char *name,uni_char_t point)
++{
++    VLC_UNUSED(name);VLC_UNUSED(point);
++    return filter->p_sys->p_families;
++}
++char *Dummy_Select(filter_t *filter,const char *name,bool bold,bool italic,int *index,uni_char_t point)
++{
++    VLC_UNUSED(filter);VLC_UNUSED(bold);VLC_UNUSED(italic);VLC_UNUSED(point);
++    if(index) *index=0;
++    return AppFont(name);
++}
+--- a/modules/codec/Makefile.am
++++ b/modules/codec/Makefile.am
+@@ -183,6 +183,9 @@
+ liblibass_plugin_la_CFLAGS = $(AM_CFLAGS) $(LIBASS_CFLAGS)
+ liblibass_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(codecdir)'
+ liblibass_plugin_la_LIBADD = $(LIBASS_LIBS) $(LIBS_libass) $(LIBS_freetype) $(FREETYPE_LIBS)
++if HAVE_RETRO
++liblibass_plugin_la_LINK = $(CXXLINK) -rpath '$(codecdir)'
++endif
+ if HAVE_WINSTORE
+ liblibass_plugin_la_LIBADD += -ldwrite
+ endif
+@@ -638,7 +641,9 @@
+ libmft_plugin_la_SOURCES = codec/mft.c packetizer/h264_nal.c packetizer/h264_nal.h
+ if HAVE_WIN32
+ libmft_plugin_la_LIBADD = $(LIBCOM) -luuid -lmfuuid -lmfplat
++if !HAVE_RETRO
+ codec_LTLIBRARIES += libmft_plugin.la
++endif
+ endif
+ 
+ libgstdecode_plugin_la_SOURCES = codec/gstreamer/gstdecode.c \
+--- a/modules/codec/libass.c
++++ b/modules/codec/libass.c
+@@ -51,6 +51,25 @@
+ #   include <vlc_charset.h>
+ #endif
+ 
++#ifdef RP_LEGACY
++/* An owned font and Matroska attachments work without DirectWrite/fontconfig. */
++static void RPAddDefaultFont(ASS_Library *library)
++{
++    wchar_t path[MAX_PATH];
++    DWORD n=GetModuleFileNameW(GetModuleHandleA("LIBCORE.DLL"),path,MAX_PATH);
++    if(!n || n>=MAX_PATH-12) return;
++    wchar_t *last=wcsrchr(path,L'\\');if(!last) return;
++    wcscpy(last+1,L"DEJAVU.TTF");
++    char *utf8=FromWide(path);if(!utf8) return;
++    block_t *font=block_FilePath(utf8,false);free(utf8);
++    if(font) {
++        if(font->i_buffer<=INT_MAX)
++            ass_add_font(library,"DEJAVU.TTF",(char *)font->p_buffer,(int)font->i_buffer);
++        block_Release(font);
++    }
++}
++#endif
++
+ /*****************************************************************************
+  * Module descriptor
+  *****************************************************************************/
+@@ -167,6 +186,9 @@
+     }
+ 
+     /* load attachments */
++#ifdef RP_LEGACY
++    RPAddDefaultFont(p_library);
++#endif
+     input_attachment_t  **pp_attachments;
+     int                   i_attachments;
+     if( decoder_GetInputAttachments( p_dec, &pp_attachments, &i_attachments ))
+@@ -246,6 +268,9 @@
+         psz_family = psz_family_droid;
+     }
+ 
++#elif defined(RP_LEGACY)
++    const char *psz_font = NULL;
++    const char *psz_family = "DejaVu Sans";
+ #elif defined( __APPLE__ )
+     const char *psz_font = NULL; /* We don't ship a default font with VLC */
+     const char *psz_family = "Helvetica Neue"; /* Use HN if we can't find anything more suitable - Arial is not on all Apple platforms */
+--- a/modules/codec/subsdec.c
++++ b/modules/codec/subsdec.c
+@@ -334,6 +334,12 @@
+     }
+ 
+     p_spu = ParseText( p_dec, p_block );
++#ifdef RP_LEGACY
++    msg_Dbg(p_dec, "subtitle parsed: bytes=%lu picture=%p start_ms=%ld stop_ms=%ld",
++            (unsigned long)p_block->i_buffer, (void *)p_spu,
++            p_spu ? (long)(p_spu->i_start / 1000) : -1L,
++            p_spu ? (long)(p_spu->i_stop / 1000) : -1L);
++#endif
+ 
+     block_Release( p_block );
+     if( p_spu != NULL )
+--- a/src/input/decoder.c
++++ b/src/input/decoder.c
+@@ -1033,7 +1033,19 @@
+     /* */
+     vlc_mutex_lock( &p_owner->lock );
+ 
+-    if( p_owner->b_waiting && !p_owner->b_first )
++#ifdef RP_LEGACY
++    /* The first decoded picture is sufficient to release input buffering.
++     * Keep the normal playing picture until the shared clock is rebased;
++     * a paused seek still needs the immediate first-picture preview. The
++     * owner lock is already held, matching input_DecoderWait's lock order. */
++    vlc_fifo_Lock( p_owner->p_fifo );
++    const bool b_clocked_first = p_owner->b_waiting && p_owner->b_first
++                             && !p_owner->paused;
++    vlc_fifo_Unlock( p_owner->p_fifo );
++#else
++    const bool b_clocked_first = false;
++#endif
++    if( p_owner->b_waiting && (!p_owner->b_first || b_clocked_first) )
+     {
+         p_owner->b_has_data = true;
+         vlc_cond_signal( &p_owner->wait_acknowledge );
+@@ -1041,6 +1053,9 @@
+     bool b_first_after_wait = p_owner->b_waiting && p_owner->b_has_data;
+ 
+     DecoderWaitUnblock( p_dec );
++
++    if( b_clocked_first )
++        p_owner->b_first = false;
+ 
+     if( p_owner->b_waiting )
+     {
+@@ -1060,6 +1075,8 @@
+     /* FIXME: The *input* FIFO should not be locked here. This will not work
+      * properly if/when pictures are queued asynchronously. */
+     vlc_fifo_Lock( p_owner->p_fifo );
++    if( b_clocked_first )
++        p_picture->b_force = p_owner->paused;
+     if( unlikely(p_owner->paused) && likely(p_owner->frames_countdown > 0) )
+         p_owner->frames_countdown--;
+     vlc_fifo_Unlock( p_owner->p_fifo );
+@@ -1277,6 +1294,11 @@
+     DecoderWaitUnblock( p_dec );
+     DecoderFixTs( p_dec, &p_subpic->i_start, &p_subpic->i_stop, NULL,
+                   NULL, INT64_MAX );
++#ifdef RP_LEGACY
++    msg_Dbg(p_dec, "subtitle clock: start_ms=%ld stop_ms=%ld now_ms=%ld",
++            (long)(p_subpic->i_start / 1000), (long)(p_subpic->i_stop / 1000),
++            (long)(mdate() / 1000));
++#endif
+     vlc_mutex_unlock( &p_owner->lock );
+ 
+     if( p_subpic->i_start <= VLC_TICK_INVALID
+@@ -1287,6 +1309,9 @@
+     }
+ 
+     vout_PutSubpicture( p_vout, p_subpic );
++#ifdef RP_LEGACY
++    msg_Dbg(p_dec, "subtitle queued to video output");
++#endif
+ }
+ 
+ static void DecoderUpdateStatSpu( decoder_owner_sys_t *p_owner,
+--- a/src/input/es_out.c
++++ b/src/input/es_out.c
+@@ -728,7 +728,16 @@
+     input_resource_TerminateVout( input_priv(p_sys->p_input)->p_resource );
+ 
+     /* */
++#ifdef RP_LEGACY
++    /* Decoder readiness precedes the display thread's first conversion and
++     * GDI surface preparation. The wave mapper also needs time to queue and
++     * start its first PCM headers. Reserve a shared preparation interval for
++     * both outputs; separate output delays would offset sound from picture.
++     * A 150 ms interval expired before first presentation on NT3 and Win9x. */
++    const vlc_tick_t i_wakeup_delay = 500 * 1000;
++#else
+     const vlc_tick_t i_wakeup_delay = 10*1000; /* FIXME CLEANUP thread wake up time*/
++#endif
+     const vlc_tick_t i_current_date = p_sys->b_paused ? p_sys->i_pause_date : mdate();
+ 
+     input_clock_ChangeSystemOrigin( p_sys->p_pgrm->p_clock, true,
+@@ -2184,6 +2193,13 @@
+          * the corresponding thread (typically the input thread), for a little
+          * bit too long if the ES is deleted in the middle of a stream. */
+         input_DecoderDrain( es->p_dec );
++        /* A short chained stream can end before the initial cache fills.
++         * Its queued packets still belong to the presentation: release the
++         * buffering gate and drain them before deleting the decoder. Closing
++         * or paused inputs must not start playback as a side effect. */
++        if( p_sys->b_buffering && p_sys->p_pgrm && !p_sys->b_paused &&
++            !input_Stopped(p_sys->p_input) )
++            EsOutDecodersStopBuffering( out, true );
+         while( !input_Stopped(p_sys->p_input) && !p_sys->b_buffering )
+         {
+             if( input_DecoderIsEmpty( es->p_dec ) &&
+--- a/test/Makefile.am
++++ b/test/Makefile.am
+@@ -84,7 +84,7 @@
+ 
+ AM_CFLAGS = -DSRCDIR=\"$(srcdir)\"
+ AM_LDFLAGS = -no-install
+-LIBVLCCORE = -L../src/ -lvlccore
++LIBVLCCORE = -L../src/ -lcore
+ LIBVLC = -L../lib -lvlc
+ 
+ test_libvlc_core_SOURCES = libvlc/core.c
+@@ -165,7 +165,7 @@
+ 	-DTOP_SRCDIR=\"$$(cd "$(top_srcdir)"; pwd)\"
+ libvlc_demux_run_la_LDFLAGS = -no-install -static
+ libvlc_demux_run_la_LIBADD = \
+-	../lib/libvlc.la ../src/libvlccore.la ../compat/libcompat.la
++	../lib/libvlc.la ../src/libcore.la ../compat/libcompat.la
+ if !HAVE_DYNAMIC_PLUGINS
+ libvlc_demux_run_la_CPPFLAGS += -DHAVE_STATIC_MODULES
+ libvlc_demux_run_la_LIBADD += \
+@@ -273,7 +273,7 @@
+ vlccoreios_LDFLAGS = $(LDFLAGS_vlc) -Wl,-framework,Foundation,-framework,UIKit
+ vlccoreios_LDFLAGS += -Xlinker -rpath -Xlinker "@executable_path/Frameworks/"
+ vlccoreios_OBJCFLAGS = -fobjc-arc
+-vlccoreios_LDADD = ../lib/libvlc.la ../src/libvlccore.la
++vlccoreios_LDADD = ../lib/libvlc.la ../src/libcore.la
+ if HAVE_DARWIN
+ if !HAVE_OSX
+ noinst_PROGRAMS += vlccoreios
+--- a/include/vlc_fixups.h
++++ b/include/vlc_fixups.h
+@@ -266,7 +266,12 @@
+ 
+ /* unistd.h */
+ #ifndef HAVE_GETPID
++#ifdef _WIN32
++/* Match MinGW process.h: its legacy declaration has no noexcept specifier. */
++pid_t getpid (void);
++#else
+ pid_t getpid (void) VLC_NOTHROW;
++#endif
+ #endif
+ 
+ #ifndef HAVE_FSYNC
+@@ -399,6 +404,20 @@
+ #endif
+ 
+ #ifndef HAVE_STRUCT_POLLFD
++#if defined(RP_LEGACY) && defined(_WIN32)
++/* Keep the same event ABI when C++ headers expose Vista's WSAPoll types.
++ * The actual legacy poll implementation is compiled at the NT5 SDK level. */
++#undef POLLIN
++#undef POLLOUT
++#undef POLLERR
++#undef POLLHUP
++#undef POLLNVAL
++#undef POLLPRI
++#undef POLLRDNORM
++#undef POLLRDBAND
++#undef POLLWRNORM
++#undef POLLWRBAND
++#endif
+ enum
+ {
+     POLLERR=0x1,
+@@ -413,12 +432,14 @@
+ #define POLLIN  (POLLRDNORM|POLLRDBAND)
+ #define POLLOUT (POLLWRNORM|POLLWRBAND)
+ 
++#if !defined(RP_LEGACY) || !defined(_WIN32) || _WIN32_WINNT < 0x0600
+ struct pollfd
+ {
+     int fd;
+     short events;
+     short revents;
+ };
++#endif
+ #endif
+ #ifndef HAVE_POLL
+ struct pollfd;
+--- a/src/vlc-plugin.pc.in
++++ b/src/vlc-plugin.pc.in
+@@ -18,7 +18,7 @@
+ 	@DEFS_BIGENDIAN@ \
+ 	-D_REENTRANT \
+ 	-D_THREAD_SAFE
+-Libs: -L${libdir} -lvlccore
++Libs: -L${libdir} -lcore
+ Libs.private: @LIBS_libvlccore@ \
+ 	@LTLIBINTL@ @LTLIBICONV@ \
+ 	@SOCKET_LIBS@ @LIBDL@ @LIBM@
+--- a/src/win32/thread.c
++++ b/src/win32/thread.c
+@@ -38,6 +38,7 @@
+ #include <limits.h>
+ #include <errno.h>
+ #include <time.h>
++#include <RPTRACE.H>
+ #if !VLC_WINSTORE_APP
+ #include <mmsystem.h>
+ #endif
+@@ -47,6 +48,10 @@
+ static CONDITION_VARIABLE super_variable;
+ 
+ #define IS_INTERRUPTIBLE (!VLC_WINSTORE_APP || _WIN32_WINNT >= 0x0A00)
++#ifdef RP_LEGACY
++# undef IS_INTERRUPTIBLE
++# define IS_INTERRUPTIBLE 0
++#endif
+ 
+ /*** Threads ***/
+ static DWORD thread_key;
+@@ -54,6 +59,10 @@
+ struct vlc_thread
+ {
+     HANDLE         id;
++#ifdef __CRTDLL__
++    HANDLE         start;
++    bool           start_failed;
++#endif
+ 
+     bool           killable;
+     atomic_bool    killed;
+@@ -68,6 +77,21 @@
+         CRITICAL_SECTION lock;
+     } wait;
+ };
++
++#ifdef RP_LEGACY
++/* NT 3.x and Windows 95 have no QueueUserAPC. Bounded waits preserve
++ * cancellation without pretending that a pending APC was delivered. */
++static DWORD vlc_wait_handle(HANDLE handle)
++{
++    for (;;)
++    {
++        vlc_testcancel();
++        DWORD result = WaitForSingleObject(handle, 10);
++        if (result != WAIT_TIMEOUT)
++            return result;
++    }
++}
++#endif
+ 
+ /*** Condition variables (low-level) ***/
+ #if (_WIN32_WINNT < _WIN32_WINNT_VISTA)
+@@ -79,6 +103,7 @@
+ static VOID (WINAPI *WakeAllConditionVariable_)(PCONDITION_VARIABLE);
+ #define WakeAllConditionVariable WakeAllConditionVariable_
+ 
++#ifndef RP_LEGACY
+ static void WINAPI DummyConditionVariable(CONDITION_VARIABLE *cv)
+ {
+     (void) cv;
+@@ -94,6 +119,7 @@
+     EnterCriticalSection(cs);
+     return ms != 0;
+ }
++#endif
+ #endif
+ 
+ /*** Mutexes ***/
+@@ -214,7 +240,11 @@
+     do
+     {
+         vlc_testcancel ();
++#ifdef RP_LEGACY
++        result = vlc_wait_handle(handle);
++#else
+         result = WaitForSingleObjectEx(handle, INFINITE, TRUE);
++#endif
+ 
+         /* Semaphore abandoned would be a bug. */
+         assert(result != WAIT_ABANDONED_0);
+@@ -481,6 +511,23 @@
+     return 0;
+ }
+ 
++#ifdef __CRTDLL__
++/* CRTDLL's _beginthread owns and closes its original handle. A start gate
++ * keeps it alive until the parent duplicates that handle and publishes th.
++ * _endthread provides CRT per-thread cleanup, including cancellation exits. */
++static void __cdecl vlc_crt_entry(void *opaque)
++{
++    struct vlc_thread *th = opaque;
++    DWORD result = WaitForSingleObject(th->start, INFINITE);
++    CloseHandle(th->start);
++    if (result != WAIT_OBJECT_0 || th->start_failed)
++        vlc_thread_destroy(th);
++    else
++        vlc_entry(th);
++    _endthread();
++}
++#endif
++
+ static int vlc_clone_attr (vlc_thread_t *p_handle, bool detached,
+                            void *(*entry) (void *), void *data, int priority)
+ {
+@@ -496,7 +543,31 @@
+     InitializeCriticalSection(&th->wait.lock);
+ 
+     HANDLE h;
+-#if VLC_WINSTORE_APP
++#ifdef __CRTDLL__
++    th->start = CreateEventA(NULL, TRUE, FALSE, NULL);
++    th->start_failed = false;
++    if (th->start == NULL)
++    {
++        vlc_thread_destroy(th);
++        return ENOMEM;
++    }
++    uintptr_t original = _beginthread(vlc_crt_entry, 0, th);
++    if (original == (uintptr_t)-1)
++    {
++        int err = errno;
++        CloseHandle(th->start);
++        vlc_thread_destroy(th);
++        return err;
++    }
++    HANDLE process = GetCurrentProcess();
++    if (!DuplicateHandle(process, (HANDLE)original, process, &h,
++                         0, FALSE, DUPLICATE_SAME_ACCESS))
++    {
++        th->start_failed = true;
++        SetEvent(th->start); /* child releases th and the original handle */
++        return EAGAIN;
++    }
++#elif VLC_WINSTORE_APP
+     h = CreateThread(NULL, 0, vlc_entry, th, 0, NULL);
+ #else // !VLC_WINSTORE_APP
+     /* When using the MSVCRT C library you have to use the _beginthreadex
+@@ -512,6 +583,18 @@
+         return err;
+     }
+ 
++#ifdef __CRTDLL__
++    th->id = detached ? NULL : h;
++    if (p_handle != NULL)
++        *p_handle = th;
++    if (priority)
++        SetThreadPriority(h, priority);
++    if (detached)
++        CloseHandle(h);
++    SetEvent(th->start);
++    /* A detached child may have destroyed th by now. */
++    return 0;
++#else
+     if (detached)
+     {
+         CloseHandle(h);
+@@ -527,6 +610,7 @@
+         SetThreadPriority (th->id, priority);
+ 
+     return 0;
++#endif
+ }
+ 
+ int vlc_clone (vlc_thread_t *p_handle, void *(*entry) (void *),
+@@ -542,7 +626,11 @@
+     do
+     {
+         vlc_testcancel ();
++#ifdef RP_LEGACY
++        ret = vlc_wait_handle(th->id);
++#else
+         ret = WaitForSingleObjectEx(th->id, INFINITE, TRUE);
++#endif
+         assert(ret != WAIT_ABANDONED_0);
+     }
+     while (ret == WAIT_IO_COMPLETION || ret == WAIT_FAILED);
+@@ -648,7 +736,9 @@
+     th->data = NULL; /* TODO: special value? */
+     if (th->id == NULL) /* Detached thread */
+         vlc_thread_destroy(th);
+-#if VLC_WINSTORE_APP
++#ifdef __CRTDLL__
++    _endthread();
++#elif VLC_WINSTORE_APP
+     ExitThread(0);
+ #else // !VLC_WINSTORE_APP
+     _endthreadex(0);
+@@ -710,6 +800,10 @@
+ }
+ 
+ /*** Clock ***/
++#if defined(RP_LEGACY) && defined(__i386__)
++# include "RPCLOCK.H"
++#endif
++
+ static union
+ {
+ #if (_WIN32_WINNT < _WIN32_WINNT_WIN7)
+@@ -812,7 +906,9 @@
+ static vlc_tick_t mdate_default(void)
+ {
+     vlc_threads_setup(NULL);
+-    return mdate_perf();
++    /* Setup may select multimedia time; the clock union then contains
++     * function pointers, not a performance-counter frequency. */
++    return mdate();
+ }
+ 
+ static vlc_tick_t (*mdate_selected) (void) = mdate_default;
+@@ -834,7 +930,11 @@
+         if (unlikely(delay > 0x7fffffff))
+             delay = 0x7fffffff;
+ 
++#ifdef RP_LEGACY
++        Sleep(delay > 10 ? 10 : (DWORD)delay);
++#else
+         SleepEx(delay, TRUE);
++#endif
+         vlc_testcancel();
+     }
+ }
+@@ -853,12 +953,43 @@
+     const char *name = "perf";
+ #else
+     const char *name = "multimedia";
++    /* Retain the upstream multimedia default. A reported performance-counter
++     * frequency does not establish its reliability during legacy driver and
++     * GDI work; the explicit clock-source option remains available. */
+ #endif
+     char *str = NULL;
+     if (obj != NULL)
+         str = var_InheritString(obj, "clock-source");
+     if (str != NULL)
+         name = str;
++#if defined(RP_LEGACY) && defined(__i386__)
++    else if (rp_tsc_available())
++        name = "tsc";
++#endif
++#if defined(RP_LEGACY) && !VLC_WINSTORE_APP
++    /* Clock precision and scheduler resolution are independent. Keep the
++     * same period request when selecting the performance counter. */
++    HMODULE timer_module = LoadLibrary(TEXT("winmm.dll"));
++    if (timer_module != NULL) {
++        MMRESULT (WINAPI *begin_period)(UINT) =
++            (void *)GetProcAddress(timer_module, "timeBeginPeriod");
++        if (begin_period != NULL)
++            begin_period(5);
++    }
++#endif
++#if defined(RP_LEGACY) && defined(__i386__)
++    if (!strcmp(name, "tsc")) {
++        if (rp_tsc_setup()) {
++            msg_Dbg(obj, "using calibrated QEMU processor counter (%lu kHz)",
++                    (unsigned long)(rp_tsc_clock.frequency / 1000));
++            mdate_selected = mdate_tsc;
++            free(str);
++            return TRUE;
++        }
++        msg_Warn(obj, "QEMU processor clock unavailable; using multimedia timers");
++        name = "multimedia";
++    }
++#endif
+     if (!strcmp (name, "interrupt"))
+     {
+         msg_Dbg (obj, "using interrupt time as clock source");
+@@ -911,8 +1042,12 @@
+         mdate_selected = mdate_multimedia;
+ 
+         timeBeginPeriod = (void*)GetProcAddress(hWinmm, "timeBeginPeriod");
++#ifndef RP_LEGACY
+         if (timeBeginPeriod != NULL)
+             timeBeginPeriod(5);
++#else
++        (void)timeBeginPeriod;
++#endif
+     }
+ #endif
+     else
+@@ -943,7 +1078,7 @@
+ size_t EnumClockSource (vlc_object_t *obj, const char *var,
+                         char ***vp, char ***np)
+ {
+-    const size_t max = 6;
++    const size_t max = 7;
+     char **values = xmalloc (sizeof (*values) * max);
+     char **names = xmalloc (sizeof (*names) * max);
+     size_t n = 0;
+@@ -956,6 +1091,13 @@
+     values[n] = xstrdup ("");
+     names[n] = xstrdup (_("Auto"));
+     n++;
++#if defined(RP_LEGACY) && defined(__i386__)
++    if (rp_tsc_available()) {
++        values[n] = xstrdup("tsc");
++        names[n] = xstrdup(_("Calibrated QEMU processor counter"));
++        n++;
++    }
++#endif
+ #if (_WIN32_WINNT < _WIN32_WINNT_WIN7)
+     if (version >= 0x0601)
+ #endif
+@@ -1049,8 +1191,16 @@
+     {
+         case DLL_PROCESS_ATTACH:
+         {
++            rp_trace("DLL: attach");
+ #if (_WIN32_WINNT < _WIN32_WINNT_WIN8)
++#ifdef RP_LEGACY
++            /* All CS objects in this build use RPKERN's mutex-backed ABI.
++             * Use its real condition events too. Looking only in old
++             * KERNEL32 silently selects the dummy 5 ms polling fallback. */
++            HANDLE h = GetModuleHandle(TEXT("RPKERN.DLL"));
++#else
+             HANDLE h = GetModuleHandle(TEXT("kernel32.dll"));
++#endif
+             if (unlikely(h == NULL))
+                 return FALSE;
+ 
+@@ -1062,17 +1212,23 @@
+                  || !LOOKUP(SleepConditionVariableCS)
+                  || !LOOKUP(WakeAllConditionVariable))
+                 {
++#ifdef RP_LEGACY
++                    return FALSE;
++#else
+                     InitializeConditionVariable_ = DummyConditionVariable;
+                     SleepConditionVariableCS_ = SleepConditionVariableFallback;
+                     WakeAllConditionVariable_ = DummyConditionVariable;
++#endif
+                 }
+ # endif
++                rp_trace("DLL: wait buckets");
+                 vlc_wait_addr_init();
+                 WaitOnAddress_ = WaitOnAddressFallback;
+                 WakeByAddressAll_ = WakeByAddressFallback;
+                 WakeByAddressSingle_ = WakeByAddressFallback;
+             }
+ #endif
++            rp_trace("DLL: thread key");
+             thread_key = TlsAlloc();
+             if (unlikely(thread_key == TLS_OUT_OF_INDEXES))
+                 return FALSE;
+@@ -1080,7 +1236,9 @@
+             InitializeCriticalSection(&super_mutex);
+             InitializeConditionVariable(&super_variable);
+             vlc_rwlock_init (&config_lock);
++            rp_trace("DLL: CPU init");
+             vlc_CPU_init ();
++            rp_trace("DLL: attached");
+             break;
+         }
+ 
+--- /dev/null
++++ b/src/win32/RPCLOCK.H
+@@ -0,0 +1,96 @@
++/* Legacy QEMU clock workaround. Included only by the Win32 clock backend.
++ * NT/Win9x PIT-based clocks can lose interrupts during emulated GDI work.
++ * Do not infer a reliable physical TSC from the instruction's presence alone.
++ */
++#include <cpuid.h>
++
++static struct {
++    uint64_t frequency, origin;
++    vlc_tick_t epoch;
++} rp_tsc_clock;
++
++static bool rp_tsc_available(void)
++{
++    unsigned a, b, c, d;
++    SYSTEM_INFO info;
++    if (!__get_cpuid(1, &a, &b, &c, &d) || !(d & (1U << 4)))
++        return false;
++    /* CPUID is known to exist before querying the hypervisor signature.
++     * Avoid assumptions about synchronized counters on multiprocessor hosts. */
++    GetSystemInfo(&info);
++    if (info.dwNumberOfProcessors != 1)
++        return false;
++    __cpuid(0x40000000, a, b, c, d);
++    char vendor[12];
++    memcpy(vendor, &b, 4);
++    memcpy(vendor + 4, &c, 4);
++    memcpy(vendor + 8, &d, 4);
++    return a >= 0x40000001 && !memcmp(vendor, "TCGTCGTCGTCG", 12);
++}
++
++static uint64_t rp_tsc_read(void)
++{
++    unsigned lo, hi;
++    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi) : : "memory");
++    return ((uint64_t)hi << 32) | lo;
++}
++
++static bool rp_tsc_setup(void)
++{
++    uint64_t ticks[8];
++    DWORD stamps[8];
++    if (!rp_tsc_available()) return false;
++    HMODULE timer = GetModuleHandleA("winmm.dll");
++    DWORD (WINAPI *read_ms)(void) = timer ?
++        (void *)GetProcAddress(timer, "timeGetTime") : NULL;
++    if (!read_ms) return false;
++    /* timeBeginPeriod can change the legacy clock's phase. On the supplied
++     * NT3.51 system its first interval jumps by about 14 ms. Let that change
++     * settle before taking the first calibration endpoint. */
++    Sleep(250);
++    /* The supplied NT3.51 HAL has a stable but incorrectly scaled QPC.
++     * Use the multimedia clock only during an idle calibration, before
++     * decoding/GDI can lose its timer interrupts. A long aggregate interval
++     * limits endpoint quantization error; inspect each shorter interval to
++     * reject stalls or lost ticks instead of averaging a discontinuity in.
++     * Never infer the frequency from the model name or a host MHz value. */
++    for (unsigned i = 0; i < ARRAY_SIZE(ticks); ++i) {
++        if (i) Sleep(250);
++        stamps[i] = read_ms();
++        ticks[i] = rp_tsc_read();
++        if (i && (ticks[i] <= ticks[i - 1] ||
++                  (DWORD)(stamps[i] - stamps[i - 1]) < 200 ||
++                  (DWORD)(stamps[i] - stamps[i - 1]) > 500))
++            return false;
++    }
++    const DWORD elapsed_ms = stamps[7] - stamps[0];
++    const uint64_t elapsed_ticks = ticks[7] - ticks[0];
++    /* Bound before multiplying, including malformed or discontinuous
++     * counters. At the maximum accepted rate this permits four seconds. */
++    if (elapsed_ticks > 400000000000ULL) return false;
++    const uint64_t rate = elapsed_ticks * 1000 / elapsed_ms;
++    if (rate < 1000000 || rate > 100000000000ULL) return false;
++    for (unsigned i = 1; i < ARRAY_SIZE(ticks); ++i) {
++        const uint64_t part = ticks[i] - ticks[i - 1];
++        const uint64_t measured = part / rate * CLOCK_FREQ +
++            part % rate * CLOCK_FREQ / rate;
++        const uint64_t reference = (DWORD)(stamps[i] - stamps[i - 1]) * 1000ULL;
++        const uint64_t error = measured > reference ?
++            measured - reference : reference - measured;
++        if (error > 5000 + reference / 2000) return false;
++    }
++    rp_tsc_clock.frequency = rate;
++    rp_tsc_clock.epoch = (vlc_tick_t)GetTickCount() * 1000 + 1;
++    rp_tsc_clock.origin = rp_tsc_read();
++    return true;
++}
++
++static vlc_tick_t mdate_tsc(void)
++{
++    const uint64_t ticks = rp_tsc_read() - rp_tsc_clock.origin;
++    const uint64_t frequency = rp_tsc_clock.frequency;
++    /* Split before multiplying so a long-running process cannot overflow
++     * merely because its counter has accumulated many CPU cycles. */
++    return rp_tsc_clock.epoch + ticks / frequency * CLOCK_FREQ +
++        ticks % frequency * CLOCK_FREQ / frequency;
++}
+--- /dev/null
++++ b/src/win32/RPLOAD.H
+@@ -0,0 +1,211 @@
++/* SPDX-License-Identifier: LGPL-2.1-or-later
++ * Validate static imports without executing a DLL. Old NT loaders can lose
++ * shared dependency references while rolling back an unresolved import.
++ * A failed optional plugin must not invalidate the running VLC core.
++ */
++#include <stdint.h>
++
++typedef struct {
++    wchar_t path[MAX_PATH];
++    HANDLE file, mapping;
++    unsigned char *bytes;
++    DWORD size;
++    IMAGE_NT_HEADERS32 *nt;
++    IMAGE_SECTION_HEADER *sections;
++    unsigned state;
++} rp_pe;
++typedef struct { rp_pe images[64]; unsigned count; } rp_images;
++#ifdef RP_PREFLIGHT
++static char rp_last_dll[260],rp_last_symbol[260];
++static void rp_trace_symbol(char *out,const char *in)
++{
++    unsigned i=0;
++    while(i<259 && in[i]) { out[i]=in[i];++i; }
++    out[i]=0;
++}
++#endif
++
++static void *rp_offset(rp_pe *p, DWORD offset, size_t size)
++{
++    if (offset > p->size || size > p->size-offset) return NULL;
++    return p->bytes+offset;
++}
++static void *rp_rva(rp_pe *p, DWORD rva, size_t size)
++{
++    if (rva < p->nt->OptionalHeader.SizeOfHeaders &&
++        size <= p->nt->OptionalHeader.SizeOfHeaders-rva)
++        return rp_offset(p,rva,size);
++    for (unsigned i=0;i<p->nt->FileHeader.NumberOfSections;++i) {
++        IMAGE_SECTION_HEADER *s=p->sections+i;
++        if (rva < s->VirtualAddress) continue;
++        DWORD off=rva-s->VirtualAddress;
++        if (off <= s->SizeOfRawData && size <= s->SizeOfRawData-off &&
++            s->PointerToRawData <= UINT32_MAX-off)
++            return rp_offset(p,s->PointerToRawData+off,size);
++    }
++    return NULL;
++}
++static const char *rp_string(rp_pe *p,DWORD rva)
++{
++    /* PE symbol/module names are bounded here before any C string operation. */
++    for(unsigned n=0;n<4096 && rva<=UINT32_MAX-n;++n) {
++        const char *end=rp_rva(p,rva+n,1);
++        if(!end) return NULL;
++        if(!*end) return rp_rva(p,rva,n+1);
++    }
++    return NULL;
++}
++static rp_pe *rp_map(rp_images *all,const wchar_t *path)
++{
++    for(unsigned i=0;i<all->count;++i)
++        if(!wcscmp(all->images[i].path,path)) return all->images+i;
++    if(all->count==64 || wcslen(path)>=MAX_PATH) return NULL;
++    rp_pe *p=all->images+all->count++;
++    wcscpy(p->path,path);
++    p->file=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,0,NULL);
++    if(p->file==INVALID_HANDLE_VALUE) return NULL;
++    DWORD high=0;
++    p->size=GetFileSize(p->file,&high);
++    if(high || p->size==INVALID_FILE_SIZE || p->size<sizeof(IMAGE_DOS_HEADER)) return NULL;
++    p->mapping=CreateFileMappingA(p->file,NULL,PAGE_READONLY,0,0,NULL);
++    if(!p->mapping) return NULL;
++    p->bytes=MapViewOfFile(p->mapping,FILE_MAP_READ,0,0,0);
++    if(!p->bytes) return NULL;
++    IMAGE_DOS_HEADER *dos=(void *)p->bytes;
++    if(dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<0) return NULL;
++    DWORD off=(DWORD)dos->e_lfanew;
++    p->nt=rp_offset(p,off,sizeof(*p->nt));
++    if(!p->nt || p->nt->Signature!=IMAGE_NT_SIGNATURE ||
++       p->nt->FileHeader.Machine!=IMAGE_FILE_MACHINE_I386 ||
++       p->nt->FileHeader.SizeOfOptionalHeader<sizeof(IMAGE_OPTIONAL_HEADER32) ||
++       p->nt->OptionalHeader.Magic!=IMAGE_NT_OPTIONAL_HDR32_MAGIC ||
++       p->nt->OptionalHeader.NumberOfRvaAndSizes<2) return NULL;
++    size_t sect=(size_t)off+offsetof(IMAGE_NT_HEADERS32,OptionalHeader)+
++                p->nt->FileHeader.SizeOfOptionalHeader;
++    if(sect>UINT32_MAX) return NULL;
++    p->sections=rp_offset(p,(DWORD)sect,
++        (size_t)p->nt->FileHeader.NumberOfSections*sizeof(*p->sections));
++    if(!p->sections) return NULL;
++    return p;
++}
++static BOOL rp_imports(rp_images *,rp_pe *,unsigned);
++static BOOL rp_symbol(rp_images *all,const char *dll,const char *name,
++                      unsigned ordinal,unsigned depth)
++{
++#ifdef RP_PREFLIGHT
++    rp_trace_symbol(rp_last_dll,dll);rp_trace_symbol(rp_last_symbol,name?name:"<ordinal>");
++#endif
++    if(depth>64) { SetLastError(ERROR_BAD_EXE_FORMAT);return FALSE; }
++    HMODULE loaded=GetModuleHandleA(dll);
++    if(loaded) {
++        if(GetProcAddress(loaded,name ? name : (LPCSTR)(uintptr_t)ordinal)) return TRUE;
++        /* Win9x's public GetProcAddress hides some private KERNEL32 ordinals
++         * used by installed system DLLs. Validate those static exports from
++         * the actual loaded module's file, without loading dependencies. */
++        if(name || !(GetVersion()&0x80000000UL)) {
++            SetLastError(ERROR_PROC_NOT_FOUND);return FALSE;
++        }
++    }
++    char path[MAX_PATH];wchar_t wide[MAX_PATH];
++    DWORD length=loaded ? GetModuleFileNameA(loaded,path,MAX_PATH) :
++                          SearchPathA(NULL,dll,NULL,MAX_PATH,path,NULL);
++    if(!length || length>=MAX_PATH ||
++       !MultiByteToWideChar(CP_ACP,0,path,-1,wide,MAX_PATH)) {
++        SetLastError(ERROR_MOD_NOT_FOUND);return FALSE;
++    }
++    rp_pe *p=rp_map(all,wide);
++    if(!p) { SetLastError(ERROR_BAD_EXE_FORMAT);return FALSE; }
++    if(!loaded && !rp_imports(all,p,depth+1)) return FALSE;
++    IMAGE_DATA_DIRECTORY dir=p->nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
++    IMAGE_EXPORT_DIRECTORY *exp=dir.VirtualAddress ? rp_rva(p,dir.VirtualAddress,sizeof(*exp)) : NULL;
++    if(!exp) { SetLastError(ERROR_PROC_NOT_FOUND);return FALSE; }
++    DWORD index=UINT32_MAX;
++    if(!name) {
++        if(ordinal>=exp->Base) index=ordinal-exp->Base;
++    } else {
++        if(exp->NumberOfNames>p->size/sizeof(DWORD)) goto malformed;
++        DWORD *names=rp_rva(p,exp->AddressOfNames,(size_t)exp->NumberOfNames*sizeof(DWORD));
++        WORD *ordinals=rp_rva(p,exp->AddressOfNameOrdinals,(size_t)exp->NumberOfNames*sizeof(WORD));
++        if(!names || !ordinals) goto malformed;
++        for(DWORD i=0;i<exp->NumberOfNames;++i) {
++            const char *candidate=rp_string(p,names[i]);
++            if(!candidate) goto malformed;
++            if(!strcmp(name,candidate)) { index=ordinals[i];break; }
++        }
++    }
++    if(index>=exp->NumberOfFunctions) { SetLastError(ERROR_PROC_NOT_FOUND);return FALSE; }
++    if(exp->NumberOfFunctions>p->size/sizeof(DWORD)) goto malformed;
++    DWORD *functions=rp_rva(p,exp->AddressOfFunctions,(size_t)exp->NumberOfFunctions*sizeof(DWORD));
++    if(!functions || !functions[index]) goto malformed;
++    DWORD rva=functions[index];
++    if(rva>=dir.VirtualAddress && rva-dir.VirtualAddress<dir.Size) {
++        const char *forward=rp_string(p,rva);
++        if(!forward) goto malformed;
++        const char *dot=strrchr(forward,'.');
++        char target[MAX_PATH];
++        if(!dot || dot==forward || !dot[1] || (size_t)(dot-forward)>MAX_PATH-5) goto malformed;
++        memcpy(target,forward,dot-forward);strcpy(target+(dot-forward),".dll");
++        if(dot[1]!='#') return rp_symbol(all,target,dot+1,0,depth+1);
++        unsigned number=0;
++        for(const char *c=dot+2;*c;++c) {
++            if(*c<'0' || *c>'9' || number>6553) goto malformed;
++            number=number*10+(*c-'0');
++        }
++        if(!number || number>65535) goto malformed;
++        return rp_symbol(all,target,NULL,number,depth+1);
++    }
++    return TRUE;
++malformed:
++    SetLastError(ERROR_BAD_EXE_FORMAT);return FALSE;
++}
++static BOOL rp_imports(rp_images *all,rp_pe *p,unsigned depth)
++{
++    if(depth>64) { SetLastError(ERROR_BAD_EXE_FORMAT);return FALSE; }
++    if(p->state) return TRUE; /* Dependencies may contain a legitimate cycle. */
++    p->state=1;
++    IMAGE_DATA_DIRECTORY dir=p->nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
++    if(!dir.VirtualAddress) { p->state=2;return TRUE; }
++    for(DWORD offset=0;offset<dir.Size;) {
++        if(dir.VirtualAddress>UINT32_MAX-offset) break;
++        IMAGE_IMPORT_DESCRIPTOR *desc=rp_rva(p,dir.VirtualAddress+offset,sizeof(*desc));
++        if(!desc) break;
++        if(!desc->Name) { p->state=2;return TRUE; }
++        const char *dll=rp_string(p,desc->Name);
++        if(!dll || !*dll) break;
++        DWORD thunk=desc->OriginalFirstThunk ? desc->OriginalFirstThunk : desc->FirstThunk;
++        if(!thunk) break;
++        for(DWORD n=0;;++n) {
++            if(n>=p->size/4 || thunk>UINT32_MAX-n*4) goto malformed;
++            DWORD *entry=rp_rva(p,thunk+n*4,sizeof(DWORD));
++            if(!entry) goto malformed;
++            if(!*entry) break;
++            unsigned ordinal=0;const char *name=NULL;
++            if(*entry&IMAGE_ORDINAL_FLAG32) ordinal=*entry&0xffff;
++            else {
++                if(*entry>UINT32_MAX-2) goto malformed;
++                name=rp_string(p,*entry+2);
++                if(!name) goto malformed;
++            }
++            if(!rp_symbol(all,dll,name,ordinal,depth+1)) return FALSE;
++        }
++        if(offset>UINT32_MAX-sizeof(*desc)) break;
++        offset+=sizeof(*desc);
++    }
++malformed:
++    SetLastError(ERROR_BAD_EXE_FORMAT);return FALSE;
++}
++static BOOL rp_preflight(const wchar_t *path)
++{
++    rp_images *all=calloc(1,sizeof(*all));
++    if(!all) { SetLastError(ERROR_NOT_ENOUGH_MEMORY);return FALSE; }
++    rp_pe *root=rp_map(all,path);
++    BOOL result=root && rp_imports(all,root,0);
++    DWORD error=result ? ERROR_SUCCESS : root ? GetLastError() : ERROR_BAD_EXE_FORMAT;
++    for(unsigned i=0;i<all->count;++i) {
++        rp_pe *p=all->images+i;
++        if(p->bytes) UnmapViewOfFile(p->bytes);
++        if(p->mapping) CloseHandle(p->mapping);
++        if(p->file && p->file!=INVALID_HANDLE_VALUE) CloseHandle(p->file);
++    }
++    free(all);SetLastError(error);return result;
++}
+--- a/src/win32/filesystem.c
++++ b/src/win32/filesystem.c
+@@ -72,6 +72,28 @@
+ 
+ int vlc_open (const char *filename, int flags, ...)
+ {
++#ifdef RP_LEGACY
++    /* Keep descriptor creation in the CRT which owns fdopen/fread/fwrite.
++     * RPCRT preserves wide paths on NT, uses the native CRT allocator on
++     * 9x, and handles O_CREAT independently from O_TRUNC. */
++    int mode = 0;
++    if (flags & O_CREAT)
++    {
++        va_list ap;
++        va_start(ap, flags);
++        mode = va_arg(ap, int);
++        va_end(ap);
++    }
++    wchar_t *wpath = widen_path(filename);
++    if (wpath == NULL)
++        return -1;
++    flags |= O_NOINHERIT;
++    if (!(flags & O_TEXT))
++        flags |= O_BINARY;
++    int fd = _wopen(wpath, flags, mode);
++    free(wpath);
++    return fd;
++#else
+     DWORD dwDesiredAccess, dwCreationDisposition, dwFlagsAndAttributes;
+ 
+     flags |= O_NOINHERIT; /* O_CLOEXEC */
+@@ -147,6 +169,7 @@
+         CloseHandle(h);
+     }
+     return fd;
++#endif
+ }
+ 
+ int vlc_openat (int dir, const char *filename, int flags, ...)
+@@ -346,6 +369,13 @@
+         return ret;
+     }
+ 
++#ifdef RP_LEGACY
++    /* RPCRT derives timestamps directly from UTC FILETIME values. The
++     * MSVCRT DST correction below is unnecessary and requires an NT4 API. */
++    free(wpath);
++    return 0;
++#else
++
+     // _wstati64() can give different st_mtime values for the same file if it
+     // was created in a different Daylight Saving Time as the current time.
+     // This is not the case in UCRT builds.
+@@ -383,6 +413,7 @@
+         return -1;
+ 
+     return 0;
++#endif
+ }
+ 
+ int vlc_lstat (const char *filename, struct stat *buf)
+@@ -409,8 +440,10 @@
+     if (wold == NULL || wnew == NULL)
+         goto out;
+ 
+-    if (_wrename (wold, wnew) && (errno == EACCES || errno == EEXIST))
++    if (_wrename (wold, wnew))
+     {   /* Windows does not allow atomic file replacement */
++        if (errno != EACCES && errno != EEXIST)
++            goto out;
+         if (_wremove (wnew))
+         {
+             errno = EACCES; /* restore errno */
+--- a/src/win32/dirs.c
++++ b/src/win32/dirs.c
+@@ -248,14 +248,49 @@
+ {
+     wchar_t wdir[MAX_PATH];
+ 
++#ifdef RP_LEGACY
++    typedef HRESULT (WINAPI *folder_fn)(HWND, int, HANDLE, DWORD, LPWSTR);
++    HMODULE shell = LoadLibraryA("SHELL32.DLL");
++    folder_fn get_folder = shell ? (folder_fn)GetProcAddress(shell, "SHGetFolderPathW") : NULL;
++    HRESULT result = get_folder ? get_folder(NULL, csidl, NULL, SHGFP_TYPE_CURRENT, wdir) : E_FAIL;
++    if (shell) FreeLibrary(shell);
++    if (result == S_OK)
++        return FromWide(wdir);
++
++    /* Program Manager systems have no Explorer shell folders. Honor the
++     * existing user profile/home before falling back to the install folder. */
++    char path[MAX_PATH];
++    DWORD size = GetEnvironmentVariableA("USERPROFILE", path, sizeof(path));
++    if (size && size < sizeof(path))
++        return FromLocaleDup(path);
++    char drive[MAX_PATH], home[MAX_PATH];
++    DWORD a = GetEnvironmentVariableA("HOMEDRIVE", drive, sizeof(drive));
++    DWORD b = GetEnvironmentVariableA("HOMEPATH", home, sizeof(home));
++    if (a && a < sizeof(drive) && b && b < sizeof(home) && a+b < sizeof(path)) {
++        memcpy(path, drive, a);
++        memcpy(path+a, home, b+1);
++        return FromLocaleDup(path);
++    }
++    return config_GetLibDir();
++#else
+     if (SHGetFolderPathW (NULL, csidl,
+                           NULL, SHGFP_TYPE_CURRENT, wdir ) == S_OK)
+         return FromWide (wdir);
+     return NULL;
++#endif
+ }
+ 
+ static char *config_GetAppDir (void)
+ {
++#ifdef RP_LEGACY
++    /* Keep writable state beside this installation with an 8.3 directory. */
++    char *base = config_GetLibDir();
++    char *path = NULL;
++    if (base != NULL && asprintf(&path, "%s\\CONFIG", base) == -1)
++        path = NULL;
++    free(base);
++    return path;
++#else
+ #if !VLC_WINSTORE_APP
+     /* if portable directory exists, use it */
+     WCHAR path[MAX_PATH];
+@@ -286,6 +321,7 @@
+         psz_dir = NULL;
+     free (psz_parent);
+     return psz_dir;
++#endif
+ }
+ 
+ #warning FIXME Use known folders on Vista and above
+--- a/src/win32/plugin.c
++++ b/src/win32/plugin.c
+@@ -32,6 +32,10 @@
+ #include "modules/modules.h"
+ #include <windows.h>
+ #include <wchar.h>
++
++#ifdef RP_LEGACY
++#include "RPLOAD.H"
++#endif
+ 
+ extern DWORD LoadLibraryFlags;
+ 
+@@ -77,15 +81,22 @@
+ 
+ static char *GetWindowsError( void )
+ {
+-    wchar_t wmsg[256];
++    wchar_t wmsg[256] = { 0 };
+     int i = 0, i_error = GetLastError();
+ 
+-    FormatMessageW( FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
++    DWORD count = FormatMessageW( FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                     NULL, i_error, MAKELANGID (LANG_NEUTRAL, SUBLANG_DEFAULT),
+                     wmsg, 256, NULL );
++    if (!count) {
++        char message[256];
++        count=FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM|FORMAT_MESSAGE_IGNORE_INSERTS,
++                            NULL,i_error,0,message,sizeof(message),NULL);
++        if (count) MultiByteToWideChar(CP_ACP,0,message,-1,wmsg,256);
++    }
++    wmsg[255]=0;
+ 
+     /* Go to the end of the string */
+-    while( !wmemchr( L"\r\n\0", wmsg[i], 3 ) )
++    while( i < 255 && !wmemchr( L"\r\n\0", wmsg[i], 3 ) )
+         i++;
+ 
+     snwprintf( wmsg + i, 256 - i, L" (error %i)", i_error );
+@@ -104,8 +115,13 @@
+     DWORD mode;
+     if (SetThreadErrorMode (SEM_FAILCRITICALERRORS, &mode) != 0)
+     {
+-        handle = LoadLibraryExW (wfile, NULL, LoadLibraryFlags );
++#ifdef RP_LEGACY
++        if (rp_preflight(wfile))
++#endif
++            handle = LoadLibraryExW (wfile, NULL, LoadLibraryFlags );
++        DWORD load_error=GetLastError();
+         SetThreadErrorMode (mode, NULL);
++        SetLastError(load_error);
+     }
+ #else
+     handle = LoadPackagedLibrary( wfile, 0 );
+--- a/compat/poll.c
++++ b/compat/poll.c
+@@ -109,6 +109,54 @@
+ # include <windows.h>
+ # include <winsock2.h>
+ 
++#ifdef RP_LEGACY
++/* Winsock 1.1 has select(), but no event-selection API. The interruptible
++ * caller uses short bounded waits so cancellation does not require APCs. */
++int poll(struct pollfd *fds, unsigned nfds, int timeout)
++{
++    fd_set read_set, write_set, error_set;
++    struct timeval tv;
++    unsigned invalid = 0, active = 0;
++    if (nfds > FD_SETSIZE) { errno = EINVAL; return -1; }
++    FD_ZERO(&read_set); FD_ZERO(&write_set); FD_ZERO(&error_set);
++    for (unsigned i = 0; i < nfds; ++i) {
++        fds[i].revents = 0;
++        if (fds[i].fd < 0) continue;
++        int type, length = sizeof(type);
++        if (getsockopt(fds[i].fd, SOL_SOCKET, SO_TYPE, (char *)&type, &length)) {
++            if (WSAGetLastError() != WSAENOTSOCK) { errno = EIO; return -1; }
++            fds[i].revents = POLLNVAL; ++invalid; continue;
++        }
++        if (fds[i].events & POLLRDNORM) FD_SET(fds[i].fd, &read_set);
++        if (fds[i].events & POLLWRNORM) FD_SET(fds[i].fd, &write_set);
++        FD_SET(fds[i].fd, &error_set);
++        ++active;
++    }
++    if (invalid) timeout = 0;
++    if (!active) {
++        if (!invalid) Sleep(timeout < 0 ? INFINITE : (DWORD)timeout);
++        return invalid;
++    }
++    tv.tv_sec = timeout < 0 ? 0 : timeout / 1000;
++    tv.tv_usec = timeout < 0 ? 0 : (timeout % 1000) * 1000;
++    int ready = select(0, &read_set, &write_set, &error_set, timeout < 0 ? NULL : &tv);
++    if (ready == SOCKET_ERROR) {
++        int error = WSAGetLastError();
++        errno = error == WSAEINTR ? EINTR : error == WSAENOBUFS ? ENOMEM : EIO;
++        return -1;
++    }
++    unsigned count = invalid;
++    for (unsigned i = 0; i < nfds; ++i) {
++        int fd = fds[i].fd;
++        if (fd < 0 || fds[i].revents == POLLNVAL) continue;
++        if (FD_ISSET(fd, &read_set)) fds[i].revents |= fds[i].events & POLLRDNORM;
++        if (FD_ISSET(fd, &write_set)) fds[i].revents |= fds[i].events & POLLWRNORM;
++        if (FD_ISSET(fd, &error_set)) fds[i].revents |= POLLERR | (fds[i].events & POLLPRI);
++        if (fds[i].revents) ++count;
++    }
++    return count;
++}
++#else
+ static int poll_compat(struct pollfd *fds, unsigned nfds, int timeout)
+ {
+     DWORD to = (timeout >= 0) ? (DWORD)timeout : INFINITE;
+@@ -268,4 +316,5 @@
+         return poll_compat(fds, nfds, timeout);
+ }
+ 
++#endif /* RP_LEGACY */
+ #endif
+--- a/src/misc/interrupt.c
++++ b/src/misc/interrupt.c
+@@ -542,14 +542,18 @@
+ 
+ #else /* _WIN32 */
+ 
++#ifndef RP_LEGACY
+ static void CALLBACK vlc_poll_i11e_wake_self(ULONG_PTR data)
+ {
+     (void) data; /* Nothing to do */
+ }
++#endif
+ 
+ static void vlc_poll_i11e_wake(void *opaque)
+ {
+-#if !VLC_WINSTORE_APP || _WIN32_WINNT >= 0x0A00
++#ifdef RP_LEGACY
++    SetEvent(opaque);
++#elif !VLC_WINSTORE_APP || _WIN32_WINNT >= 0x0A00
+     HANDLE th = opaque;
+     QueueUserAPC(vlc_poll_i11e_wake_self, th, 0);
+ #else
+@@ -560,6 +564,7 @@
+ static void vlc_poll_i11e_cleanup(void *opaque)
+ {
+     vlc_interrupt_t *ctx = opaque;
++    if (ctx == NULL) return;
+     HANDLE th = ctx->data;
+ 
+     vlc_interrupt_finish(ctx);
+@@ -569,6 +574,32 @@
+ int vlc_poll_i11e(struct pollfd *fds, unsigned nfds, int timeout)
+ {
+     vlc_interrupt_t *ctx = vlc_interrupt_var;
++#ifdef RP_LEGACY
++    HANDLE event = NULL;
++    int ret;
++    vlc_tick_t deadline = timeout < 0 ? 0 : mdate() + (vlc_tick_t)timeout * 1000;
++    if (ctx != NULL) {
++        event = CreateEventA(NULL, TRUE, FALSE, NULL);
++        if (event == NULL) { errno = ENOMEM; return -1; }
++        vlc_interrupt_prepare(ctx, vlc_poll_i11e_wake, event);
++    }
++    vlc_cleanup_push(vlc_poll_i11e_cleanup, ctx);
++    do {
++        vlc_testcancel();
++        if (event && WaitForSingleObject(event, 0) == WAIT_OBJECT_0) {
++            ret = -1;
++            break;
++        }
++        vlc_tick_t remaining = timeout < 0 ? 10 : (deadline - mdate() + 999) / 1000;
++        int slice = remaining < 0 ? 0 : remaining > 10 ? 10 : (int)remaining;
++        ret = vlc_poll(fds, nfds, slice);
++        if (ret != 0) break;
++    } while (timeout < 0 || mdate() < deadline);
++    vlc_cleanup_pop();
++    if (ctx != NULL && vlc_interrupt_finish(ctx)) { errno = EINTR; ret = -1; }
++    if (event) CloseHandle(event);
++    return ret;
++#else
+     if (ctx == NULL)
+         return vlc_poll(fds, nfds, timeout);
+ 
+@@ -597,6 +628,7 @@
+ 
+     CloseHandle(th);
+     return ret;
++#endif
+ }
+ 
+ ssize_t vlc_readv_i11e(int fd, struct iovec *iov, int count)
+--- a/src/misc/block.c
++++ b/src/misc/block.c
+@@ -350,6 +350,17 @@
+ static
+ ssize_t pread (int fd, void *buf, size_t count, off_t offset)
+ {
++#ifdef RP_LEGACY
++    /* Win9x rejects OVERLAPPED offsets for regular synchronous files.
++     * Like the NT implementation below this changes the file pointer;
++     * block_FilePath owns its descriptor and does not share it with readers. */
++    if (GetVersion() & 0x80000000UL)
++    {
++        if (_lseeki64(fd, offset, SEEK_SET) != offset)
++            return -1;
++        return _read(fd, buf, count > INT_MAX ? INT_MAX : (unsigned)count);
++    }
++#endif
+     HANDLE handle = (HANDLE)(intptr_t)_get_osfhandle (fd);
+     if (handle == INVALID_HANDLE_VALUE)
+         return -1;
+@@ -420,8 +431,10 @@
+     for (size_t i = 0; i < length;)
+     {
+         ssize_t len = pread (fd, block->p_buffer + i, length - i, i);
+-        if (len == -1)
++        if (len <= 0)
+         {
++            if (len == 0)
++                errno = EIO; /* File truncated after fstat: do not spin. */
+             block_Release (block);
+             block = NULL;
+             break;
+--- a/src/win32/specific.c
++++ b/src/win32/specific.c
+@@ -49,6 +49,10 @@
+     {
+         if (LOBYTE(data.wVersion) == 2 && HIBYTE(data.wVersion) == 2)
+             return 0;
++#ifdef RP_LEGACY
++        if (LOBYTE(data.wVersion) == 1 && HIBYTE(data.wVersion) >= 1)
++            return 0;
++#endif
+         /* Winsock DLL is not usable */
+         WSACleanup( );
+     }
+--- a/src/win32/rand.c
++++ b/src/win32/rand.c
+@@ -64,6 +64,32 @@
+     }
+ 
+     HCRYPTPROV hProv;
++#ifdef RP_LEGACY
++    /* CryptoAPI is optional on NT 3.x and early 95 installations. Resolve
++     * the real provider when installed; retain upstream's prefilled fallback
++     * when it is absent. This fallback is not a cryptographic RNG. */
++    typedef BOOL (WINAPI *acquire_fn)(HCRYPTPROV *, LPCSTR, LPCSTR, DWORD, DWORD);
++    typedef BOOL (WINAPI *generate_fn)(HCRYPTPROV, DWORD, BYTE *);
++    typedef BOOL (WINAPI *release_fn)(HCRYPTPROV, DWORD);
++    char system[MAX_PATH];
++    UINT size = GetSystemDirectoryA(system, MAX_PATH - 14);
++    if (!size || size >= MAX_PATH - 14)
++        return;
++    memcpy(system + size, "\\ADVAPI32.DLL", sizeof("\\ADVAPI32.DLL"));
++    HMODULE module = LoadLibraryA(system);
++    if (module == NULL)
++        return;
++    acquire_fn acquire = (acquire_fn)GetProcAddress(module, "CryptAcquireContextA");
++    generate_fn generate = (generate_fn)GetProcAddress(module, "CryptGenRandom");
++    release_fn release = (release_fn)GetProcAddress(module, "CryptReleaseContext");
++    if (acquire && generate && release &&
++        acquire(&hProv, NULL, MS_DEF_PROV_A, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
++    {
++        generate(hProv, len, buf);
++        release(hProv, 0);
++    }
++    FreeLibrary(module);
++#else
+     /* acquire default encryption context */
+     if( CryptAcquireContext(
+         &hProv,                 // Variable to hold returned handle.
+@@ -77,5 +103,6 @@
+         CryptGenRandom(hProv, len, buf);
+         CryptReleaseContext(hProv, 0);
+     }
++#endif
+ #endif /* VLC_WINSTORE_APP */
+ }
+--- /dev/null
++++ b/include/RPTRACE.H
+@@ -0,0 +1,27 @@
++/* Temporary diagnostics for the RetroPlayer engine bring-up. */
++#ifndef RP_TRACE_H
++#define RP_TRACE_H
++#if defined(RP_LEGACY) && !defined(RP_NOTRACE)
++#include <windows.h>
++static inline void rp_trace(const char *message)
++{
++    char path[MAX_PATH], *p, *last;
++    DWORD size, written;
++    HANDLE file;
++    size=GetModuleFileNameA(NULL,path,MAX_PATH);
++    if (!size || size>=MAX_PATH-16) return;
++    last=path;
++    for (p=path; *p; ++p) if (*p=='\\') last=p+1;
++    lstrcpyA(last,"TRACE.TXT");
++    file=CreateFileA(path,GENERIC_WRITE,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
++    if (file==INVALID_HANDLE_VALUE) return;
++    SetFilePointer(file,0,NULL,FILE_END);
++    size=(DWORD)lstrlenA(message);
++    WriteFile(file,message,size,&written,NULL);
++    WriteFile(file,"\r\n",2,&written,NULL);
++    CloseHandle(file);
++}
++#else
++#define rp_trace(message) ((void)0)
++#endif
++#endif
+--- a/lib/core.c
++++ b/lib/core.c
+@@ -37,10 +37,13 @@
+ #include <assert.h>
+ 
+ #include "../src/revision.c"
++#include <RPTRACE.H>
+ 
+ libvlc_instance_t * libvlc_new( int argc, const char *const *argv )
+ {
++    rp_trace("API: threads init");
+     libvlc_threads_init ();
++    rp_trace("API: allocate instance");
+ 
+     libvlc_instance_t *p_new = malloc (sizeof (*p_new));
+     if (unlikely(p_new == NULL))
+@@ -52,16 +55,20 @@
+          my_argv[i + 1] = argv[i];
+     my_argv[argc + 1] = NULL; /* C calling conventions require a NULL */
+ 
++    rp_trace("API: internal create");
+     libvlc_int_t *p_libvlc_int = libvlc_InternalCreate();
+     if (unlikely (p_libvlc_int == NULL))
+         goto error;
+ 
++    rp_trace("API: internal init");
+     if (libvlc_InternalInit( p_libvlc_int, argc + 1, my_argv ))
+     {
++        rp_trace("API: internal init failed");
+         libvlc_InternalDestroy( p_libvlc_int );
+         goto error;
+     }
+ 
++    rp_trace("API: internal init passed");
+     p_new->p_libvlc_int = p_libvlc_int;
+     p_new->vlm = NULL;
+     p_new->ref_count = 1;
+--- a/src/libvlc.c
++++ b/src/libvlc.c
+@@ -64,6 +64,7 @@
+ #include <vlc_modules.h>
+ 
+ #include "libvlc.h"
++#include <RPTRACE.H>
+ #include "playlist/playlist_internal.h"
+ #include "misc/variables.h"
+ 
+@@ -118,29 +119,35 @@
+     int          i_ret = VLC_EGENERIC;
+ 
+     /* System specific initialization code */
++    rp_trace("CORE: system init");
+     system_Init();
+ 
++    rp_trace("CORE: log preinit");
+     vlc_LogPreinit(p_libvlc);
+ 
+     /* Initialize the module bank and load the configuration of the
+      * core module. We need to do this at this stage to be able to display
+      * a short help if required by the user. (short help == core module
+      * options) */
++    rp_trace("CORE: module bank");
+     module_InitBank ();
+ 
+     /* Get command line options that affect module loading. */
++    rp_trace("CORE: early command line");
+     if( config_LoadCmdLine( p_libvlc, i_argc, ppsz_argv, NULL ) )
+     {
+         module_EndBank (false);
+         return VLC_EGENERIC;
+     }
+ 
++    rp_trace("CORE: clock setup");
+     vlc_threads_setup (p_libvlc);
+ 
+     /* Load the builtins and plugins into the module_bank.
+      * We have to do it before config_Load*() because this also gets the
+      * list of configuration options exported by each module and loads their
+      * default values. */
++    rp_trace("CORE: load plugins");
+     size_t module_count = module_LoadPlugins (p_libvlc);
+ 
+     /*
+@@ -161,6 +168,7 @@
+     if( config_LoadCmdLine( p_libvlc, i_argc, ppsz_argv, &vlc_optind ) )
+         goto error;
+ 
++    rp_trace("CORE: log init");
+     vlc_LogInit(p_libvlc);
+ 
+     /*
+@@ -173,12 +181,14 @@
+     /*xgettext: Translate "C" to the language code: "fr", "en_GB", "nl", "ru"... */
+     msg_Dbg( p_libvlc, "translation test: code is \"%s\"", _("C") );
+ 
++    rp_trace("CORE: help test");
+     if (config_PrintHelp (VLC_OBJECT(p_libvlc)))
+     {
+         libvlc_InternalCleanup (p_libvlc);
+         exit(0);
+     }
+ 
++    rp_trace("CORE: plugin count test");
+     if( module_count <= 1 )
+     {
+         msg_Err( p_libvlc, "No plugins found! Check your VLC installation.");
+--- a/src/modules/bank.c
++++ b/src/modules/bank.c
+@@ -418,11 +418,17 @@
+ 
+         if (S_ISREG (st.st_mode))
+         {
++#if !defined(RP_LEGACY) && !defined(__OS2__)
+             static const char prefix[] = "lib";
+             static const char suffix[] = "_plugin"LIBEXT;
++#endif
+             size_t len = strlen (file);
+ 
+-#ifndef __OS2__
++#if defined(RP_LEGACY)
++            /* Distributed plugin names are mapped to DOS 8.3 names. */
++            if (len > strlen(LIBEXT) && len <= 12
++             && !strcasecmp(file + len - strlen(LIBEXT), LIBEXT))
++#elif !defined(__OS2__)
+             /* Check that file matches the "lib*_plugin"LIBEXT pattern */
+             if (len > strlen (suffix)
+              && !strncmp (file, prefix, strlen (prefix))
+--- a/src/modules/cache.c
++++ b/src/modules/cache.c
+@@ -40,6 +40,7 @@
+ #include <vlc_common.h>
+ #include <vlc_block.h>
+ #include "libvlc.h"
++#include <RPTRACE.H>
+ 
+ #include <vlc_plugin.h>
+ #include <errno.h>
+@@ -661,13 +662,25 @@
+     if (asprintf (&filename, "%s"DIR_SEP CACHE_NAME, dir ) == -1)
+         goto out;
+ 
++#ifdef RP_LEGACY
++    /* NT3.x FAT volumes require a DOS 8.3 temporary name as well. */
++    if (asprintf (&tmpname, "%s"DIR_SEP"%08"PRIx32".TMP", dir, (uint32_t)getpid ()) == -1)
++#else
+     if (asprintf (&tmpname, "%s.%"PRIu32, filename, (uint32_t)getpid ()) == -1)
++#endif
+         goto out;
+     msg_Dbg (p_this, "saving plugins cache %s", filename);
++#ifdef RP_LEGACY
++    /* Retained during bring-up: initialization precedes LibVLC log callbacks. */
++    rp_trace(tmpname);
++#endif
+ 
+     FILE *file = vlc_fopen (tmpname, "wb");
+     if (file == NULL)
+     {
++#ifdef RP_LEGACY
++        char note[80];wsprintfA(note,"CACHE OPEN errno=%d error=%lu",errno,GetLastError());rp_trace(note);
++#endif
+         if (errno != EACCES && errno != ENOENT)
+             msg_Warn (p_this, "cannot create %s: %s", tmpname,
+                       vlc_strerror_c(errno));
+@@ -676,6 +689,9 @@
+ 
+     if (CacheSaveBank(file, entries, n))
+     {
++#ifdef RP_LEGACY
++        char note[80];wsprintfA(note,"CACHE WRITE errno=%d error=%lu",errno,GetLastError());rp_trace(note);
++#endif
+         msg_Warn (p_this, "cannot write %s: %s", tmpname,
+                   vlc_strerror_c(errno));
+         clearerr (file);
+@@ -688,9 +704,27 @@
+     vlc_rename (tmpname, filename); /* atomically replace old cache */
+     fclose (file);
+ #else
+-    vlc_unlink (filename);
+-    fclose (file);
+-    vlc_rename (tmpname, filename);
++    if (fclose (file) == 0)
++    {
++        if (vlc_rename (tmpname, filename))
++        {
++            msg_Warn(p_this, "cannot replace plugins cache: %s", vlc_strerror_c(errno));
++#ifdef RP_LEGACY
++            char note[80];wsprintfA(note,"CACHE RENAME errno=%d error=%lu",errno,GetLastError());rp_trace(note);
++#endif
++            vlc_unlink(tmpname);
++        }
++    }
++    else
++    {
++#ifdef RP_LEGACY
++        char note[80];wsprintfA(note,"CACHE CLOSE errno=%d error=%lu",errno,GetLastError());rp_trace(note);
++#endif
++        vlc_unlink(tmpname);
++    }
++#ifdef RP_LEGACY
++    rp_trace(filename);
++#endif
+ #endif
+ out:
+     free (filename);
+--- a/modules/access/file.c
++++ b/modules/access/file.c
+@@ -123,7 +123,17 @@
+ #else /* _WIN32 || __OS2__ */
+ static bool IsRemote (const char *path)
+ {
+-# if !defined(__OS2__) && !VLC_WINSTORE_APP
++# if defined(RP_LEGACY)
++    if (path[0] == '\\' && path[1] == '\\')
++        return true;
++    if (((path[0] >= 'A' && path[0] <= 'Z') ||
++         (path[0] >= 'a' && path[0] <= 'z')) && path[1] == ':')
++    {
++        char root[] = {path[0], ':', '\\', 0};
++        return GetDriveTypeA(root) == DRIVE_REMOTE;
++    }
++    return false;
++# elif !defined(__OS2__) && !VLC_WINSTORE_APP
+     wchar_t *wpath = ToWide (path);
+     bool is_remote = (wpath != NULL && PathIsNetworkPathW (wpath));
+     free (wpath);

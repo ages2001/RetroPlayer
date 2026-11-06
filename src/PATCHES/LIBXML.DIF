@@ -1,0 +1,117 @@
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -168,3 +168,5 @@
+   value: false,
+   description: 'build a minimally sized library'
+ )
++
++option('legacy_windows', type: 'boolean', value: false, description: 'Use the RetroPlayer Windows compatibility runtime')
+--- a/meson.build
++++ b/meson.build
+@@ -363,7 +363,7 @@
+ endif
+ 
+ ### crypto
+-if sys_windows == true
++if sys_windows == true and not get_option('legacy_windows')
+     bcrypt_dep = cc.find_library('bcrypt', required: true)
+     xml_deps += bcrypt_dep
+ endif
+--- a/dict.c
++++ b/dict.c
+@@ -17,6 +17,9 @@
+  */
+ 
+ #define IN_LIBXML
++#if defined(RP_LEGACY) && !defined(_CRT_RAND_S)
++#define _CRT_RAND_S
++#endif
+ #include "libxml.h"
+ 
+ #include <errno.h>
+@@ -891,7 +894,9 @@
+ #ifdef _WIN32
+   #define WIN32_LEAN_AND_MEAN
+   #include <windows.h>
++  #ifndef RP_LEGACY
+   #include <bcrypt.h>
++  #endif
+ #else
+   #if HAVE_DECL_GETENTROPY
+     /* POSIX 2024 */
+@@ -916,7 +921,24 @@
+     xmlInitMutex(&xmlRngMutex);
+ 
+     {
+-#ifdef _WIN32
++#if defined(_WIN32) && defined(RP_LEGACY)
++        unsigned first, second;
++        if (rand_s(&first) == 0 && rand_s(&second) == 0) {
++            globalRngState[0] = first;
++            globalRngState[1] = second;
++        } else {
++            /* Dictionary hash randomization only, never cryptographic use.
++             * Legacy systems without a provider use the same class of weak
++             * address/time seed as the upstream no-getentropy POSIX path. */
++            LARGE_INTEGER counter;
++            counter.QuadPart = 0;
++            QueryPerformanceCounter(&counter);
++            globalRngState[0] = GetTickCount() ^ GetCurrentProcessId() ^
++                counter.LowPart ^ (unsigned)(size_t)&xmlInitRandom;
++            globalRngState[1] = counter.HighPart ^ GetCurrentThreadId() ^
++                HASH_ROL((unsigned)(size_t)&counter, 16);
++        }
++#elif defined(_WIN32)
+         NTSTATUS status;
+ 
+         /*
+--- a/globals.c
++++ b/globals.c
+@@ -79,7 +79,11 @@
+ #ifdef LIBXML_THREAD_ENABLED
+ 
+ #ifdef HAVE_WIN32_THREADS
+-  #if defined(LIBXML_STATIC) && !defined(LIBXML_STATIC_FOR_DLL)
++  #if defined(RP_LEGACY)
++    /* The shared legacy runtime dispatches TLS destructors at thread exit. */
++    extern int __cdecl __gthr_win32_key_create(DWORD *, void (*)(void *));
++    extern int __cdecl __gthr_win32_key_delete(DWORD);
++  #elif defined(LIBXML_STATIC) && !defined(LIBXML_STATIC_FOR_DLL)
+     #define USE_WAIT_DTOR
+   #else
+     #define USE_DLL_MAIN
+@@ -361,8 +365,14 @@
+     pthread_key_create(&globalkey, xmlFreeGlobalState);
+ #elif defined(HAVE_WIN32_THREADS)
+ #ifndef USE_TLS
+-    if (globalkey == TLS_OUT_OF_INDEXES)
++    if (globalkey == TLS_OUT_OF_INDEXES) {
++#ifdef RP_LEGACY
++        if (__gthr_win32_key_create(&globalkey, xmlFreeGlobalState) != 0)
++            xmlAbort("libxml2: Failed to allocate a TLS key\n");
++#else
+         globalkey = TlsAlloc();
++#endif
++    }
+ #endif
+ #else /* no thread support */
+     xmlInitGlobalState(&globalState);
+@@ -398,9 +408,17 @@
+         xmlFreeGlobalState(gs);
+     pthread_key_delete(globalkey);
+ #elif defined(HAVE_WIN32_THREADS)
+-#if defined(USE_WAIT_DTOR) && !defined(USE_TLS)
++#if (defined(USE_WAIT_DTOR) || defined(RP_LEGACY)) && !defined(USE_TLS)
+     if (globalkey != TLS_OUT_OF_INDEXES) {
++#ifdef RP_LEGACY
++        xmlGlobalState *gs = TlsGetValue(globalkey);
++        TlsSetValue(globalkey, NULL);
++        if (gs != NULL)
++            xmlFreeGlobalState(gs);
++        __gthr_win32_key_delete(globalkey);
++#else
+         TlsFree(globalkey);
++#endif
+         globalkey = TLS_OUT_OF_INDEXES;
+     }
+ #endif

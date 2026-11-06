@@ -1,0 +1,73 @@
+--- a/src/video_output/video_output.c
++++ b/src/video_output/video_output.c
+@@ -1172,11 +1172,28 @@
+         msg_Warn(vout, "picture is late (%lld ms)", delay / 1000);
+ #endif
+     if (!is_forced)
++#ifdef RP_LEGACY
++        /* A legacy software display can spend tens of milliseconds copying
++         * pixels. Its completion, rather than entry into Display, is the
++         * presentation time. Keep this estimate separate from preparation
++         * so waiting for the deadline cannot inflate the measured cost. */
++        mwait(todisplay->date - vout->p->display_delay);
++#else
+         mwait(todisplay->date);
++#endif
+ 
+     /* Display the direct buffer returned by vout_RenderPicture */
+     vout->p->displayed.date = mdate();
+     vout_display_Display(vd, todisplay, subpic);
++#ifdef RP_LEGACY
++    const vlc_tick_t display_duration = mdate() - vout->p->displayed.date;
++    if (display_duration >= 0)
++        vout->p->display_delay = vout->p->display_delay ?
++            (3 * vout->p->display_delay + display_duration) / 4 : display_duration;
++    /* Refresh intervals start after the visible copy has completed. Counting
++     * the copy itself as idle time can otherwise trigger continuous redraws. */
++    vout->p->displayed.date += display_duration;
++#endif
+ 
+     vout_statistic_AddDisplayed(&vout->p->statistic, 1);
+ 
+@@ -1198,7 +1215,11 @@
+             ;
+ 
+     const vlc_tick_t date = mdate();
+-    const vlc_tick_t render_delay = vout_chrono_GetHigh(&vout->p->render) + VOUT_MWAIT_TOLERANCE;
++    const vlc_tick_t render_delay = vout_chrono_GetHigh(&vout->p->render) + VOUT_MWAIT_TOLERANCE
++#ifdef RP_LEGACY
++        + vout->p->display_delay
++#endif
++        ;
+ 
+     bool drop_next_frame = frame_by_frame;
+     vlc_tick_t date_next = VLC_TICK_INVALID;
+@@ -1636,10 +1657,16 @@
+     vout->p->pause.date      = VLC_TICK_INVALID;
+ 
+     vout_chrono_Init(&vout->p->render, 5, 10000); /* Arbitrary initial time */
++#ifdef RP_LEGACY
++    vout->p->display_delay = 0;
++#endif
+ }
+ 
+ static void ThreadClean(vout_thread_t *vout)
+ {
++#ifdef RP_LEGACY
++    msg_Dbg(vout, "Legacy display latency estimate: %ld us", (long)vout->p->display_delay);
++#endif
+     vout_chrono_Clean(&vout->p->render);
+     vout->p->dead = true;
+     vout_control_Dead(&vout->p->control);
+--- a/src/video_output/vout_internal.h
++++ b/src/video_output/vout_internal.h
+@@ -139,6 +139,9 @@
+     picture_pool_t  *decoder_pool;
+     picture_fifo_t  *decoder_fifo;
+     vout_chrono_t   render;           /**< picture render time estimator */
++#ifdef RP_LEGACY
++    vlc_tick_t     display_delay;    /**< synchronous presentation duration */
++#endif
+ };
+ 
+ /* TODO to move them to vlc_vout.h */

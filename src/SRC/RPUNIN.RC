@@ -1,0 +1,3 @@
+/* Icon for the RetroPlayer uninstaller (red X). Icon index 0 is used by the
+ * Program Manager item added on NT 3.x and by the EXE's own icon. */
+1 ICON "RPUNIN.ICO"

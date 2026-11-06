@@ -1,0 +1,20 @@
+--- MMCORE/src/input/es_out.c
++++ LEADCORE/src/input/es_out.c
+@@ -729,11 +729,12 @@
+ 
+     /* */
+ #ifdef RP_LEGACY
+-    /* The NT3/9x wave mapper can spend several scheduler ticks starting its
+-     * first write (75 ms measured on NT3.1). Give both outputs the same
+-     * preparation lead; waveOut queues short packets while paused before
+-     * waiting for this date. A 10 ms lead can expire before one tick. */
+-    const vlc_tick_t i_wakeup_delay = 150 * 1000;
++    /* Decoder readiness precedes the display thread's first conversion and
++     * GDI surface preparation. The wave mapper also needs time to queue and
++     * start its first PCM headers. Reserve a shared preparation interval for
++     * both outputs; separate output delays would offset sound from picture.
++     * A 150 ms interval expired before first presentation on NT3 and Win9x. */
++    const vlc_tick_t i_wakeup_delay = 500 * 1000;
+ #else
+     const vlc_tick_t i_wakeup_delay = 10*1000; /* FIXME CLEANUP thread wake up time*/
+ #endif

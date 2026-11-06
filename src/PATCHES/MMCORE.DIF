@@ -1,0 +1,21 @@
+--- a/src/win32/thread.c
++++ b/src/win32/thread.c
+@@ -949,15 +949,9 @@
+     const char *name = "perf";
+ #else
+     const char *name = "multimedia";
+-#ifdef RP_LEGACY
+-    /* Win9x multimedia time can lag during legacy GUI/driver work. Prefer
+-     * its hardware-backed counter when available; retain multimedia time
+-     * for machines without a usable counter and honor an explicit option. */
+-    LARGE_INTEGER frequency;
+-    if ((GetVersion() & 0x80000000UL) &&
+-        QueryPerformanceFrequency(&frequency) && frequency.QuadPart > 0)
+-        name = "perf";
+-#endif
++    /* Retain the upstream multimedia default. A reported performance-counter
++     * frequency does not establish its reliability during legacy driver and
++     * GDI work; the explicit clock-source option remains available. */
+ #endif
+     char *str = NULL;
+     if (obj != NULL)

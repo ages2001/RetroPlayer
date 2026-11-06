@@ -1,0 +1,155 @@
+--- a/modules/audio_filter/resampler/ugly.c
++++ b/modules/audio_filter/resampler/ugly.c
+@@ -39,6 +39,8 @@
+  *****************************************************************************/
+ static int Create (vlc_object_t *);
+ static int CreateResampler (vlc_object_t *);
++static void Close (vlc_object_t *);
++static void Flush (filter_t *);
+ 
+ static block_t *DoWork( filter_t *, block_t * );
+ 
+@@ -50,12 +52,19 @@
+     set_capability( "audio converter", 2 )
+     set_category( CAT_AUDIO )
+     set_subcategory( SUBCAT_AUDIO_RESAMPLER )
+-    set_callbacks( Create, NULL )
++    set_callbacks( Create, Close )
+ 
+     add_submodule()
+     set_capability( "audio resampler", 2 )
+-    set_callbacks( CreateResampler, NULL )
++    set_callbacks( CreateResampler, Close )
+ vlc_module_end ()
++
++struct filter_sys_t {
++    /* Source position of the next output sample, relative to the current
++     * input block, in units of 1/output_rate input samples. */
++    uint64_t phase;
++    unsigned output_rate;
++};
+ 
+ /*****************************************************************************
+  * Create: allocate ugly resampler
+@@ -79,31 +88,71 @@
+      || !AOUT_FMT_LINEAR( &p_filter->fmt_in.audio ) )
+         return VLC_EGENERIC;
+ 
++    p_filter->p_sys = calloc(1, sizeof(*p_filter->p_sys));
++    if (!p_filter->p_sys)
++        return VLC_ENOMEM;
++    p_filter->p_sys->output_rate = p_filter->fmt_out.audio.i_rate;
+     p_filter->pf_audio_filter = DoWork;
++    p_filter->pf_flush = Flush;
+     return VLC_SUCCESS;
+ }
+ 
++static void Close(vlc_object_t *obj)
++{
++    filter_t *filter = (filter_t *)obj;
++    free(filter->p_sys);
++}
++
++static void Flush(filter_t *filter)
++{
++    filter->p_sys->phase = 0;
++    filter->p_sys->output_rate = filter->fmt_out.audio.i_rate;
++}
++
+ /*****************************************************************************
+  * DoWork: convert a buffer
+  *****************************************************************************/
+ static block_t *DoWork( filter_t * p_filter, block_t * p_in_buf )
+ {
+-    /* Check if we really need to run the resampler */
+-    if( p_filter->fmt_out.audio.i_rate == p_filter->fmt_in.audio.i_rate )
+-        return p_in_buf;
+-
+-    block_t *p_out_buf = p_in_buf;
+-    uint64_t i_out_count = (uint64_t)p_in_buf->i_nb_samples
+-        * p_filter->fmt_out.audio.i_rate / p_filter->fmt_in.audio.i_rate;
++    filter_sys_t *sys = p_filter->p_sys;
++    const unsigned irate = p_filter->fmt_in.audio.i_rate;
++    const unsigned orate = p_filter->fmt_out.audio.i_rate;
+     const unsigned framesize = (p_filter->fmt_in.audio.i_bitspersample / 8)
+         * aout_FormatNbChannels( &p_filter->fmt_in.audio );
+-    if( !framesize || i_out_count > UINT_MAX ||
++    if (!irate || !orate || !framesize ||
++        p_in_buf->i_nb_samples > p_in_buf->i_buffer / framesize) {
++        block_Release(p_in_buf);
++        return NULL;
++    }
++    if (p_in_buf->i_flags & BLOCK_FLAG_DISCONTINUITY)
++        Flush(p_filter);
++    uint64_t phase = sys->phase;
++    if (orate != sys->output_rate) {
++        /* Preserve the source position when the output clock rate changes.
++         * Splitting the product avoids overflow for extreme valid rates. */
++        phase = phase / sys->output_rate * orate +
++                phase % sys->output_rate * orate / sys->output_rate;
++        sys->output_rate = orate;
++    }
++    if (irate == orate && phase == 0)
++        return p_in_buf;
++
++    const uint64_t end = (uint64_t)p_in_buf->i_nb_samples * orate;
++    const uint64_t i_out_count = phase < end ? (end - phase - 1) / irate + 1 : 0;
++    if( i_out_count > UINT_MAX ||
+         i_out_count > SIZE_MAX / framesize )
+     {
+         block_Release( p_in_buf );
+         return NULL;
+     }
+     unsigned int i_out_nb = i_out_count;
++    sys->phase = phase + i_out_count * irate - end;
++    if (!i_out_nb) {
++        block_Release(p_in_buf);
++        return NULL;
++    }
++
++    block_t *p_out_buf = p_in_buf;
+ 
+     if( p_filter->fmt_out.audio.i_rate > p_filter->fmt_in.audio.i_rate )
+     {
+@@ -114,7 +163,6 @@
+ 
+     unsigned char *p_out = p_out_buf->p_buffer;
+     unsigned char *p_in = p_in_buf->p_buffer;
+-    unsigned int i_remainder = 0;
+ 
+     p_out_buf->i_nb_samples = i_out_nb;
+     p_out_buf->i_buffer = i_out_nb * framesize;
+@@ -122,19 +170,27 @@
+     p_out_buf->i_length = (mtime_t)p_out_buf->i_nb_samples *
+         CLOCK_FREQ / p_filter->fmt_out.audio.i_rate;
+ 
++    /* Divide once per block. A 64-bit division for each PCM frame is costly
++     * on i386 and can make a clock correction itself exhaust the queue.
++     * The quotient/remainder step emits exactly floor(phase / orate). */
++    size_t source_index = phase / orate;
++    unsigned remainder = phase % orate;
++    const unsigned advance = irate / orate;
++    const unsigned fraction = irate % orate;
+     while( i_out_nb )
+     {
++        p_in = p_in_buf->p_buffer + source_index * framesize;
+         if( p_out != p_in )
+             memcpy( p_out, p_in, framesize );
+         p_out += framesize;
+         i_out_nb--;
+ 
+-        i_remainder += p_filter->fmt_in.audio.i_rate;
+-        while( i_remainder >= p_filter->fmt_out.audio.i_rate )
+-        {
+-            p_in += framesize;
+-            i_remainder -= p_filter->fmt_out.audio.i_rate;
+-        }
++        source_index += advance;
++        /* Subtract before adding so the sum cannot overflow unsigned. */
++        if (remainder >= orate - fraction) {
++            remainder -= orate - fraction;
++            source_index++;
++        } else remainder += fraction;
+     }
+ 
+     if( p_in_buf != p_out_buf )

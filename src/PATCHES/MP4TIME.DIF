@@ -1,0 +1,44 @@
+--- a/modules/demux/mp4/mp4.c
++++ b/modules/demux/mp4/mp4.c
+@@ -443,6 +443,27 @@
+     *pi_delta = MP4_rescale_mtime( delta, p_track->i_timescale );
+     return true;
+ }
++
++#ifdef RP_LEGACY
++/* Apply the edit to composition time before clamping to the movie origin.
++ * Edited B-frame streams can have a negative decode time but a valid zero
++ * presentation time. Adding CTTS to the already clamped DTS delays those
++ * opening pictures by the edit's media offset. Keep the decoder's existing
++ * nonnegative DTS separately from this presentation timestamp. */
++static inline bool MP4_TrackGetPTS( demux_t *p_demux, const mp4_track_t *track,
++                                   vlc_tick_t *pts )
++{
++    const mp4_chunk_t *chunk = &track->chunk[track->i_chunk];
++    const uint32_t sample = track->i_sample - chunk->i_sample_first;
++    stime_t delta;
++    if( !MP4_ChunkGetSampleCTSDelta( chunk, sample, &delta ) )
++        return false;
++    stime_t time = MP4_ChunkGetSampleDTS( chunk, sample ) + delta;
++    MP4_TrackTimeApplyELST( track, p_demux->p_sys->i_timescale, &time );
++    *pts = VLC_TICK_0 + MP4_rescale_mtime( time, track->i_timescale );
++    return true;
++}
++#endif
+ 
+ static inline mtime_t MP4_GetSamplesDuration( demux_t *p_demux, mp4_track_t *p_track,
+                                               unsigned i_nb_samples )
+@@ -1415,8 +1436,13 @@
+             /* dts */
+             p_block->i_dts = VLC_TICK_0 + i_current_nzdts;
+             /* pts */
++#ifdef RP_LEGACY
++            if( MP4_TrackGetPTS( p_demux, tk, &i_delta ) )
++                p_block->i_pts = i_delta;
++#else
+             if( MP4_TrackGetPTSDelta( p_demux, tk, &i_delta ) )
+                 p_block->i_pts = p_block->i_dts + i_delta;
++#endif
+             else if( tk->fmt.i_cat != VIDEO_ES )
+                 p_block->i_pts = p_block->i_dts;
+             else

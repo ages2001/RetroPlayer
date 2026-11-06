@@ -1,0 +1,22 @@
+# Source this file from the shell before building the VLC engine.
+rp_tools=/workspace/TOOLS/SYSROOT/usr
+export PATH="$rp_tools/bin:$PATH"
+export LD_LIBRARY_PATH="$rp_tools/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PERL5LIB="$rp_tools/share/automake-1.17:$rp_tools/share/autoconf${PERL5LIB:+:$PERL5LIB}"
+export autom4te_perllibdir="$rp_tools/share/autoconf"
+export AC_MACRODIR="$rp_tools/share/autoconf"
+export AUTOMAKE_LIBDIR="$rp_tools/share/automake-1.17"
+export ACLOCAL_AUTOMAKE_DIR="$rp_tools/share/aclocal-1.17"
+export ACLOCAL_PATH="$rp_tools/share/aclocal:/usr/share/aclocal"
+export gettext_datadir="$rp_tools/share/gettext"
+export _lt_pkgdatadir="$rp_tools/share/libtool"
+export AUTOM4TE="$rp_tools/bin/autom4te"
+export AUTOM4TE_CFG=/workspace/TOOLS/AUTOM4.CFG
+export AUTOCONF="$rp_tools/bin/autoconf"
+export AUTOHEADER="$rp_tools/bin/autoheader"
+export AUTOMAKE="$rp_tools/bin/automake-1.17"
+export ACLOCAL="$rp_tools/bin/aclocal-1.17"
+export M4="$rp_tools/bin/m4"
+export trailer_m4="$rp_tools/share/autoconf/autoconf/trailer.m4"
+export BISON_PKGDATADIR="$rp_tools/share/bison"
+export PYTHONPATH="$rp_tools/lib/python3/dist-packages${PYTHONPATH:+:$PYTHONPATH}"

@@ -1,0 +1,87 @@
+RetroPlayer: OS-aware video-output selection
+============================================
+
+The stock vout wrapper selects the "vout display" module from the "vout"
+variable via the "$vout" expansion. In this build that variable is never
+populated (neither --vout nor a :vout media option reaches it), so the module
+search always runs as "any" and the highest-priority module that happens to
+initialise is used. On modern Windows that is Direct3D, whose path is
+unvalidated in the i386/no-SIMD engine and crashes.
+
+This patch makes vout_OpenWrapper choose the module list by operating system,
+giving each OS the highest-DirectX output it can actually run (Direct3D 9 only
+where its runtime exists, DirectDraw on 95/NT4, software GDI everywhere as the
+fall-back), and honouring an RP_VOUT environment override set by the front
+end's Video menu. Applies to src/video_output/vout_wrapper.c.
+
+--- a/src/video_output/vout_wrapper.c
++++ b/src/video_output/vout_wrapper.c
+@@
++#if defined(RP_LEGACY) && defined(_WIN32)
++#include <windows.h>
++/* RetroPlayer chooses the video output by operating system, because the stock
++ * "$vout" variable is not reliably propagated to the display object in this
++ * build. Each system is given the highest-DirectX output it can actually run,
++ * with a software fall-back chain behind it:
++ *
++ *   Windows 95            DirectDraw -> rpgdi   (no Direct3D 9 runtime on 95)
++ *   Windows 98 / 98SE / Me  Direct3D 9 -> DirectDraw -> rpgdi
++ *   Windows NT 3.x        rpgdi                 (no usable DirectX)
++ *   Windows NT 4.0        DirectDraw -> rpgdi   (NT 4 tops out at DirectDraw)
++ *   Windows 2000 / XP / XP x64 / 2003  Direct3D 9 -> DirectDraw -> rpgdi
++ *   Windows Vista and later  Direct3D 9 -> DirectDraw -> rpgdi
++ *
++ * Direct3D 9 is tried only where its runtime exists, so it never wastes a
++ * failed load on 95 or NT 4. rpgdi is the always-present software GDI output.
++ * An explicit RP_VOUT value (set by the front end's Video menu) overrides all
++ * of this. */
++static const char *rp_vout_list(void)
++{
++    static char override[64];
++    DWORD n = GetEnvironmentVariableA("RP_VOUT", override, (DWORD)sizeof(override));
++    DWORD v, major, minor;
++    if (n > 0 && n < sizeof(override))
++        return override;
++    v = GetVersion();
++    major = (DWORD)(LOBYTE(LOWORD(v)));
++    minor = (DWORD)(HIBYTE(LOWORD(v)));
++    if (v & 0x80000000UL) {                           /* Windows 9x family */
++        if (major == 4 && minor == 0)
++            return "directdraw,rpgdi";                /* Windows 95 */
++        return "direct3d9,directdraw,rpgdi";          /* Windows 98 / 98SE / Me */
++    }
++    if (major < 4)
++        return "rpgdi";                               /* NT 3.1 / 3.5 / 3.51 */
++    if (major == 4)
++        return "directdraw,rpgdi";                    /* NT 4.0 */
++    /* NT 5 (2000 / XP / XP x64 / 2003) and NT 6+ (Vista / 7 / 8 / 10 / 11):
++     * Direct3D 9 is attempted first. The Direct3D 11 output that crashed the
++     * i386/no-SIMD engine on modern Windows has been removed from the build,
++     * and the Direct3D 9 output fails gracefully (falling through to DirectDraw
++     * then software GDI) when no Direct3D 9 device is available. */
++    return "direct3d9,directdraw,rpgdi";
++}
++#endif
++
+ int vout_OpenWrapper(vout_thread_t *vout,
+                      const char *splitter_name, const vout_display_state_t *state)
+ {
+@@
+     const vlc_tick_t hide_timeout = var_CreateGetInteger(vout, "mouse-hide-timeout") * 1000;
+
++#if defined(RP_LEGACY) && defined(_WIN32)
++    const char *rp_vout = rp_vout_list();
++    msg_Dbg(vout, "RetroPlayer vout preference: %s", rp_vout);
++#else
++    const char *rp_vout = "$vout";
++#endif
++
+     if (splitter_name) {
+-        sys->display.vd = vout_NewSplitter(vout, &vout->p->original, state, "$vout", splitter_name,
++        sys->display.vd = vout_NewSplitter(vout, &vout->p->original, state, rp_vout, splitter_name,
+                                            double_click_timeout, hide_timeout);
+     } else {
+-        sys->display.vd = vout_NewDisplay(vout, &vout->p->original, state, "$vout",
++        sys->display.vd = vout_NewDisplay(vout, &vout->p->original, state, rp_vout,
+                                           double_click_timeout, hide_timeout);
+     }

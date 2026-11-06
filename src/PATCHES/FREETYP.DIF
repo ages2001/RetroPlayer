@@ -1,0 +1,77 @@
+--- a/include/freetype/config/ftstdlib.h
++++ b/include/freetype/config/ftstdlib.h
+@@ -169,8 +169,25 @@
+                                 /*       `jmp_buf` is defined as a macro */
+                                 /*       on certain platforms            */
+ 
+-#define ft_longjmp     longjmp
+-#define ft_setjmp( b ) setjmp( *(ft_jmp_buf*) &(b) ) /* same thing here */
++#ifdef RP_LEGACY
++/* C-only validator jumps. NT 3.1 CRTDLL assumes an older SEH frame layout.
++ * The shared adapter preserves the x86 calling convention without reading
++ * Windows' SEH chain. Do not use it to unwind SEH/C++ handlers. */
++#ifdef __cplusplus
++extern "C" {
++#endif
++extern int __cdecl RPSetJmp(void *) __attribute__((returns_twice));
++extern void __cdecl RPLongJmp(void *,int) __attribute__((noreturn));
++#ifdef __cplusplus
++}
++#endif
++#define ft_setjmp( b ) RPSetJmp( *(ft_jmp_buf*) &(b) )
++#define ft_longjmp RPLongJmp
++#else
++#define ft_longjmp longjmp
++#define ft_setjmp( b ) setjmp( *(ft_jmp_buf*) &(b) )
++#endif
++
+ 
+ 
+   /* The following is only used for debugging purposes, i.e., if   */
+--- a/src/base/ftsystem.c
++++ b/src/base/ftsystem.c
+@@ -33,6 +33,32 @@
+ #include <freetype/fterrors.h>
+ #include <freetype/fttypes.h>
+ 
++#ifdef RP_LEGACY
++#include <windows.h>
++#include <wchar.h>
++
++  /* VLC supplies UTF-8 paths. RPKERN implements strict UTF-8 conversion on
++   * old Windows; RPCRT keeps Unicode on NT and checks ACP conversion on 9x. */
++  static FT_FILE*
++  rp_font_open( const char* path )
++  {
++    int count = MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS,
++                                    path, -1, NULL, 0 );
++    wchar_t* wide;
++    FT_FILE* file = NULL;
++    if ( count <= 0 )
++      return NULL;
++    wide = (wchar_t*)ft_smalloc( (size_t)count * sizeof( *wide ) );
++    if ( !wide )
++      return NULL;
++    if ( MultiByteToWideChar( CP_UTF8, MB_ERR_INVALID_CHARS,
++                             path, -1, wide, count ) == count )
++      file = _wfopen( wide, L"rb" );
++    ft_sfree( wide );
++    return file;
++  }
++#endif
++
+ 
+   /**************************************************************************
+    *
+@@ -255,7 +281,11 @@
+     stream->read               = NULL;
+     stream->close              = NULL;
+ 
++#ifdef RP_LEGACY
++    file = rp_font_open( filepathname );
++#else
+     file = ft_fopen( filepathname, "rb" );
++#endif
+     if ( !file )
+     {
+       FT_ERROR(( "FT_Stream_Open:"

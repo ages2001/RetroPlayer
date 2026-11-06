@@ -1,0 +1,29 @@
+--- a/src/video_output/video_output.c
++++ b/src/video_output/video_output.c
+@@ -1332,6 +1332,26 @@
+ 
+ static void ThreadFlush(vout_thread_t *vout, bool below, vlc_tick_t date)
+ {
++#ifdef RP_LEGACY
++    /* Buffering can rebase the clock before the display thread has consumed
++     * its forced first-picture preview. The second picture requests a partial
++     * flush against the new clock; the preview still has an old-clock date
++     * and can otherwise be removed without ever reaching the output. Present
++     * that initial preview before applying the partial flush. Full seek/stop
++     * flushes must discard it, and an existing display must not be replayed. */
++    if (!below && date > VLC_TICK_INVALID + 1 &&
++        !vout->p->displayed.current && !vout->p->displayed.next &&
++        !vout->p->displayed.decoded) {
++        picture_t *preview = picture_fifo_Peek(vout->p->decoder_fifo);
++        bool forced = preview && preview->b_force;
++        if (preview)
++            picture_Release(preview);
++        if (forced) {
++            vlc_tick_t deadline = VLC_TICK_INVALID;
++            ThreadDisplayPicture(vout, &deadline);
++        }
++    }
++#endif
+     vout->p->step.timestamp = VLC_TICK_INVALID;
+     vout->p->step.last      = VLC_TICK_INVALID;
+ 

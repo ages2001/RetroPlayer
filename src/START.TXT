@@ -1,0 +1,25 @@
+RetroPlayer current development snapshot - 2026-11-02
+
+Read the 2026-11-03 summary at the top of STATUS.TXT first, then WIN16.MD.
+Read STATUS.TXT for completed work, all user requirements and remaining work.
+This is not a finished release. Win32 and Win16 scope is not complete.
+
+BIN is the latest combined candidate tested in K5 and K7/K9. The independent
+output matrix passes 15 of 16 checks; one NT3.51 HEVC scene remains late.
+Win32s installation and player compatibility are still unvalidated.
+
+Copy BIN's contents to C:\RETROPLA on NT3.xx, or
+C:\Program Files\RetroPlayer on NT4/9x. Keep the subdirectories, run
+CACHE.EXE once in that folder, then RETRO.EXE.
+
+BIN is now integrated into BUILD/ASM, and BUILD/SETUP installs exactly this
+candidate (293 files, verified on all four guests). Experimental BUILD profiles are retained for
+development evidence, not interchangeable release packages.
+
+SRC contains RetroPlayer code. SOURCES/CURRENT contains complete snapshots
+of the external working source trees; SOURCES also retains upstream archives.
+PATCHES, scripts, tests, drivers, licenses and existing results are included.
+Windows installation media and virtual disks are excluded.
+
+FILES.SHA lists every other ZIP member and its SHA-256. Archive integrity
+does not establish complete functionality. No push was performed.

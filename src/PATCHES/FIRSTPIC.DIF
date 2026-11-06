@@ -1,0 +1,39 @@
+--- a/src/input/decoder.c
++++ b/src/input/decoder.c
+@@ -1033,7 +1033,19 @@
+     /* */
+     vlc_mutex_lock( &p_owner->lock );
+ 
+-    if( p_owner->b_waiting && !p_owner->b_first )
++#ifdef RP_LEGACY
++    /* Normal playback must not expose a forced first-picture preview before
++     * EsOut has aligned the shared audio/video clock. Slow output startup can
++     * otherwise show that picture hundreds of milliseconds before its sound.
++     * Preserve the immediate preview when seeking while paused. */
++    vlc_fifo_Lock( p_owner->p_fifo );
++    const bool b_clocked_first = p_owner->b_waiting && p_owner->b_first
++                             && !p_owner->paused;
++    vlc_fifo_Unlock( p_owner->p_fifo );
++#else
++    const bool b_clocked_first = false;
++#endif
++    if( p_owner->b_waiting && (!p_owner->b_first || b_clocked_first) )
+     {
+         p_owner->b_has_data = true;
+         vlc_cond_signal( &p_owner->wait_acknowledge );
+@@ -1041,6 +1053,15 @@
+     bool b_first_after_wait = p_owner->b_waiting && p_owner->b_has_data;
+ 
+     DecoderWaitUnblock( p_dec );
++
++    if( b_clocked_first )
++    {
++        p_owner->b_first = false;
++        vlc_fifo_Lock( p_owner->p_fifo );
++        p_picture->b_force = p_owner->paused;
++        vlc_fifo_Unlock( p_owner->p_fifo );
++        msg_Dbg( p_dec, "first picture released after clock synchronization" );
++    }
+ 
+     if( p_owner->b_waiting )
+     {

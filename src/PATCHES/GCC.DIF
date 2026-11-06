@@ -1,0 +1,107 @@
+--- a/libstdc++-v3/configure.host
++++ b/libstdc++-v3/configure.host
+@@ -271,6 +271,8 @@
+     os_include_dir="os/hpux"
+     ;;
+   mingw32*)
++    # The RetroPlayer i386 runtime owns all atomic operations across modules.
++    atomicity_dir="cpu/generic/atomicity_builtins"
+     case "$host" in
+       *-w64-*)
+         os_include_dir="os/mingw32-w64"
+--- a/libstdc++-v3/include/std/mutex
++++ b/libstdc++-v3/include/std/mutex
+@@ -898,6 +898,11 @@
+   // This function is passed to pthread_once by std::call_once.
+   // It runs __once_call() or __once_functor().
+   extern "C" void __once_proxy(void);
++#ifdef RP_LEGACY
++  extern "C" void __gthr_win32_once_reset(__gthread_once_t*);
++  extern "C" int __gthr_win32_once_begin(__gthread_once_t*);
++  extern "C" void __gthr_win32_once_complete(__gthread_once_t*);
++#endif
+ 
+   /// Invoke a callable and synchronize with other calls using the same flag
+   template<typename _Callable, typename... _Args>
+@@ -910,11 +915,24 @@
+ 			std::forward<_Args>(__args)...);
+       };
+ 
++#ifdef RP_LEGACY
++      // Keep throwing user code in this C++ frame. The old CRT's C adapter
++      // has no cross-module exception unwind information.
++      if (__gthr_win32_once_begin(&__once._M_once)) {
++        try {
++          __callable();
++          __gthr_win32_once_complete(&__once._M_once);
++        } catch (...) {
++          __gthr_win32_once_reset(&__once._M_once);
++          throw;
++        }
++      }
++#else
+       once_flag::_Prepare_execution __exec(__callable);
+-
+       // XXX pthread_once does not reset the flag if an exception is thrown.
+       if (int __e = __gthread_once(&__once._M_once, &__once_proxy))
+ 	__throw_system_error(__e);
++#endif
+     }
+ 
+ #else // _GLIBCXX_HAS_GTHREADS
+--- a/libstdc++-v3/src/c++11/chrono.cc
++++ b/libstdc++-v3/src/c++11/chrono.cc
+@@ -24,6 +24,10 @@
+ 
+ #include <bits/c++config.h>
+ #include <chrono>
++#ifdef _WIN32
++#include <windows.h>
++#include <mutex>
++#endif
+ 
+ // Conditional inclusion of sys/time.h for gettimeofday
+ #if !defined(_GLIBCXX_USE_CLOCK_MONOTONIC) && \
+@@ -50,7 +54,11 @@
+     system_clock::time_point
+     system_clock::now() noexcept
+     {
+-#ifdef _GLIBCXX_USE_CLOCK_REALTIME
++#ifdef _WIN32
++      union { FILETIME ft; unsigned long long value; } now;
++      GetSystemTimeAsFileTime(&now.ft);
++      return time_point(duration((now.value-116444736000000000ULL)*100));
++#elif defined(_GLIBCXX_USE_CLOCK_REALTIME)
+       timespec tp;
+       // -EINVAL, -EFAULT
+ #ifdef _GLIBCXX_USE_CLOCK_GETTIME_SYSCALL
+@@ -78,7 +86,28 @@
+     steady_clock::time_point
+     steady_clock::now() noexcept
+     {
+-#ifdef _GLIBCXX_USE_CLOCK_MONOTONIC
++#ifdef _WIN32
++      LARGE_INTEGER counter,frequency;
++      if (QueryPerformanceFrequency(&frequency) && frequency.QuadPart>0 &&
++          QueryPerformanceCounter(&counter) && counter.QuadPart>=0) {
++        const auto seconds=counter.QuadPart/frequency.QuadPart;
++        const auto remainder=counter.QuadPart%frequency.QuadPart;
++        const auto fraction=static_cast<rep>((static_cast<long double>(remainder)*1000000000L)/frequency.QuadPart);
++        return time_point(duration(seconds*1000000000LL+fraction));
++      }
++      // Rare HALs without a performance counter use the 32-bit system tick.
++      // Extend observed wraps under a shared lock; never use wall-clock time
++      // for the monotonic clock. Calls less than 49 days apart retain elapsed
++      // time across wraps; unobserved multiple wraps cannot be reconstructed.
++      static mutex lock;
++      static DWORD previous=0;
++      static unsigned long long high=0;
++      lock_guard<mutex> guard(lock);
++      DWORD tick=GetTickCount();
++      if (tick<previous) high+=1ULL<<32;
++      previous=tick;
++      return time_point(duration((high+tick)*1000000ULL));
++#elif defined(_GLIBCXX_USE_CLOCK_MONOTONIC)
+       timespec tp;
+       // -EINVAL, -EFAULT
+ #ifdef _GLIBCXX_USE_CLOCK_GETTIME_SYSCALL

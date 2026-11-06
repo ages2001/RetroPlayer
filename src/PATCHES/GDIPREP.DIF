@@ -1,0 +1,210 @@
+--- a/modules/video_output/RPGDI.c
++++ b/modules/video_output/RPGDI.c
+@@ -30,25 +30,32 @@
+     mtime_t refreshed;
+     uint8_t *dib;
+     size_t dib_size;
++    HDC surface;
++    HBITMAP bitmap;
++    HGDIOBJ old_bitmap;
++    unsigned surface_width, surface_height, surface_depth;
++    bool prepared;
++    bool cache_valid;
++    unsigned cached_width, cached_height;
++    vout_display_place_t cached_place;
+ };
+ static picture_pool_t *Pool(vout_display_t *vd,unsigned count)
+ {
+     if (!vd->sys->pool) vd->sys->pool=picture_pool_NewFromFormat(&vd->fmt,count);
+     return vd->sys->pool;
+ }
+-static void Draw(vout_display_t *vd)
++static bool Draw(vout_display_t *vd, picture_t *picture, HDC dc,
++                 const RECT *client)
+ {
+     vout_display_sys_t *sys=vd->sys;
+-    RECT client;
+     BITMAPINFO bitmap;
+-    HDC dc;
+     vout_display_place_t place;
+-    picture_t *picture=sys->last;
+     unsigned width=vd->fmt.i_visible_width,height=vd->fmt.i_visible_height;
+     unsigned x=vd->fmt.i_x_offset,y=vd->fmt.i_y_offset;
+     size_t stride,size;
+-    if (!picture || !GetClientRect(sys->window,&client) ||
+-        client.right<=0 || client.bottom<=0) return;
++    bool unchanged=sys->cache_valid && dc==sys->surface &&
++        sys->cached_width==width && sys->cached_height==height;
++    if (!picture || client->right<=0 || client->bottom<=0) return false;
+     /* Positive-height, 24-bit DIBs work with the original Win95 display
+      * drivers, including drivers that reject top-down 32-bit StretchDIBits.
+      * Copy just the visible image so source offsets use no DIB conventions. */
+@@ -56,26 +63,37 @@
+         x>=(unsigned)picture->p[0].i_pitch/4 ||
+         width>(unsigned)picture->p[0].i_pitch/4-x ||
+         y>=(unsigned)picture->p[0].i_lines ||
+-        height>(unsigned)picture->p[0].i_lines-y) return;
++        height>(unsigned)picture->p[0].i_lines-y) return false;
+     stride=((size_t)width*3+3)&~(size_t)3;
+-    if (height>SIZE_MAX/stride) return;
++    if (height>SIZE_MAX/stride) return false;
+     size=stride*height;
+     if (size>sys->dib_size) {
+         uint8_t *dib=realloc(sys->dib,size);
+-        if (!dib) return;
++        if (!dib) return false;
+         sys->dib=dib; sys->dib_size=size;
++        unchanged=false;
+     }
+     for (unsigned row=0;row<height;row++) {
+         const uint8_t *src=picture->p[0].p_pixels+(size_t)(y+row)*picture->p[0].i_pitch+x*4;
+         uint8_t *dst=sys->dib+(height-1-row)*stride;
+         for (unsigned col=0;col<width;col++) {
++            if (unchanged && (dst[col*3]!=src[col*4] ||
++                dst[col*3+1]!=src[col*4+1] || dst[col*3+2]!=src[col*4+2]))
++                unchanged=false;
+             dst[col*3]=src[col*4]; dst[col*3+1]=src[col*4+1]; dst[col*3+2]=src[col*4+2];
+         }
+         memset(dst+width*3,0,stride-width*3);
+     }
+-    sys->config.display.width=client.right;
+-    sys->config.display.height=client.bottom;
++    sys->config.display.width=client->right;
++    sys->config.display.height=client->bottom;
+     vout_display_PlacePicture(&place,&vd->source,&sys->config,false);
++    /* VLC also prepares repeats while paused or waiting for the next frame.
++     * Compare actual pixels, including blended subtitles, rather than using
++     * timestamps or buffer addresses as a proxy for unchanged content. */
++    if (unchanged && place.x==sys->cached_place.x && place.y==sys->cached_place.y &&
++        place.width==sys->cached_place.width && place.height==sys->cached_place.height)
++        return true;
++    sys->cache_valid=false;
+     memset(&bitmap,0,sizeof(bitmap));
+     bitmap.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);
+     bitmap.bmiHeader.biWidth=width;
+@@ -83,18 +101,79 @@
+     bitmap.bmiHeader.biPlanes=1;
+     bitmap.bmiHeader.biBitCount=24;
+     bitmap.bmiHeader.biCompression=BI_RGB;
+-    dc=GetDC(sys->window);
+-    if (!dc) return;
+     /* Clear only the letterbox borders; avoid flashing the video rectangle. */
+-    PatBlt(dc,0,0,client.right,place.y,BLACKNESS);
+-    PatBlt(dc,0,place.y+place.height,client.right,client.bottom-place.y-place.height,BLACKNESS);
++    PatBlt(dc,0,0,client->right,place.y,BLACKNESS);
++    PatBlt(dc,0,place.y+place.height,client->right,client->bottom-place.y-place.height,BLACKNESS);
+     PatBlt(dc,0,place.y,place.x,place.height,BLACKNESS);
+-    PatBlt(dc,place.x+place.width,place.y,client.right-place.x-place.width,place.height,BLACKNESS);
++    PatBlt(dc,place.x+place.width,place.y,client->right-place.x-place.width,place.height,BLACKNESS);
+     SetStretchBltMode(dc,COLORONCOLOR);
+     int drawn=StretchDIBits(dc,place.x,place.y,place.width,place.height,
+         0,0,width,height,sys->dib,&bitmap,DIB_RGB_COLORS,SRCCOPY);
+     if (drawn==0 || drawn==GDI_ERROR)
+         msg_Err(vd,"StretchDIBits returned %d: %lu",drawn,GetLastError());
++    else if (dc==sys->surface) {
++        sys->cache_valid=true;
++        sys->cached_width=width; sys->cached_height=height;
++        sys->cached_place=place;
++    }
++    return drawn!=0 && drawn!=GDI_ERROR;
++}
++static void DeleteSurface(vout_display_sys_t *sys)
++{
++    if (sys->surface) {
++        SelectObject(sys->surface,sys->old_bitmap);
++        DeleteObject(sys->bitmap);
++        DeleteDC(sys->surface);
++    }
++    sys->surface=NULL;
++    sys->bitmap=NULL;
++    sys->prepared=false;
++    sys->cache_valid=false;
++}
++static void Prepare(vout_display_t *vd, picture_t *picture,
++                    subpicture_t *subpicture)
++{
++    vout_display_sys_t *sys=vd->sys;
++    RECT client;
++    VLC_UNUSED(subpicture);
++    sys->prepared=false;
++    if (!GetClientRect(sys->window,&client) ||
++        client.right<=0 || client.bottom<=0) return;
++    HDC dc=GetDC(sys->window);
++    if (!dc) return;
++    unsigned depth=GetDeviceCaps(dc,BITSPIXEL)*GetDeviceCaps(dc,PLANES);
++    if (!sys->surface || sys->surface_width!=(unsigned)client.right ||
++        sys->surface_height!=(unsigned)client.bottom || sys->surface_depth!=depth) {
++        /* Compatible bitmaps/DCs exist on NT3.1. Scale and quantize here so
++         * VLC measures this work before choosing the presentation deadline. */
++        HDC surface=CreateCompatibleDC(dc);
++        HBITMAP bitmap=surface ? CreateCompatibleBitmap(dc,client.right,client.bottom) : NULL;
++        HGDIOBJ old=bitmap ? SelectObject(surface,bitmap) : NULL;
++        if (!old || old==HGDI_ERROR) {
++            if (bitmap) DeleteObject(bitmap);
++            if (surface) DeleteDC(surface);
++            ReleaseDC(sys->window,dc);
++            return; /* Display retains the immediate DIB fallback. */
++        }
++        DeleteSurface(sys);
++        sys->surface=surface; sys->bitmap=bitmap; sys->old_bitmap=old;
++        sys->surface_width=client.right; sys->surface_height=client.bottom;
++        sys->surface_depth=depth;
++    }
++    ReleaseDC(sys->window,dc);
++    sys->prepared=Draw(vd,picture,sys->surface,&client);
++}
++static void Present(vout_display_t *vd)
++{
++    vout_display_sys_t *sys=vd->sys;
++    HDC dc=GetDC(sys->window);
++    if (!dc) return;
++    bool copied=sys->prepared && BitBlt(dc,0,0,sys->surface_width,
++                                       sys->surface_height,sys->surface,0,0,SRCCOPY);
++    if (!copied) {
++        RECT client;
++        if (GetClientRect(sys->window,&client)) Draw(vd,sys->last,dc,&client);
++    }
+     ReleaseDC(sys->window,dc);
+     sys->refreshed=mdate();
+ }
+@@ -102,7 +181,7 @@
+ {
+     if (vd->sys->last) picture_Release(vd->sys->last);
+     vd->sys->last=picture;
+-    Draw(vd);
++    Present(vd);
+     VLC_UNUSED(subpicture);
+ }
+ static void Manage(vout_display_t *vd)
+@@ -112,9 +191,13 @@
+         ((unsigned)client.right!=vd->sys->width || (unsigned)client.bottom!=vd->sys->height)) {
+         vd->sys->width=client.right; vd->sys->height=client.bottom;
+         vout_display_SendEventDisplaySize(vd,client.right,client.bottom);
++        if (vd->sys->last) {
++            Prepare(vd,vd->sys->last,NULL);
++            Present(vd);
++        }
+     }
+     /* Restore an exposed or resized window while playback is paused. */
+-    if (mdate()-vd->sys->refreshed>=100000) Draw(vd);
++    if (vd->sys->last && mdate()-vd->sys->refreshed>=100000) Present(vd);
+ }
+ static int Control(vout_display_t *vd,int query,va_list args)
+ {
+@@ -141,7 +224,7 @@
+     video_format_ApplyRotation(&vd->fmt,&vd->source);
+     vd->fmt.i_chroma=VLC_CODEC_RGB32;
+     vd->fmt.i_rmask=0xff0000; vd->fmt.i_gmask=0x00ff00; vd->fmt.i_bmask=0x0000ff;
+-    vd->pool=Pool; vd->prepare=NULL; vd->display=Display; vd->manage=Manage; vd->control=Control;
++    vd->pool=Pool; vd->prepare=Prepare; vd->display=Display; vd->manage=Manage; vd->control=Control;
+     vout_display_DeleteWindow(vd,NULL);
+     return VLC_SUCCESS;
+ }
+@@ -150,6 +233,7 @@
+     vout_display_t *vd=(vout_display_t *)object;
+     if (vd->sys->last) picture_Release(vd->sys->last);
+     if (vd->sys->pool) picture_pool_Release(vd->sys->pool);
++    DeleteSurface(vd->sys);
+     free(vd->sys->dib);
+     free(vd->sys);
+ }

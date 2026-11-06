@@ -1,0 +1,56 @@
+/* RetroPlayer 16 resources. Dialogs avoid COMMDLG so they work on Windows 3.0. */
+#include <windows.h>
+#include "RETRO16.H"
+
+RETRO16 ICON RETRO16.ICO
+
+MAINMENU MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Open...", IDM_OPEN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_EXIT
+    END
+    POPUP "&Playback"
+    BEGIN
+        MENUITEM "&Play", IDM_PLAY
+        MENUITEM "P&ause / Resume", IDM_PAUSE
+        MENUITEM "&Stop", IDM_STOP
+        MENUITEM SEPARATOR
+        MENUITEM "&Back 10 seconds", IDM_BACK
+        MENUITEM "&Forward 10 seconds", IDM_FORWARD
+        MENUITEM "Go to be&ginning", IDM_START
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About RetroPlayer 16...", IDM_ABOUT
+    END
+END
+
+OPENDLG DIALOG 20, 20, 220, 130
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Open"
+FONT 8, "Helv"
+BEGIN
+    LTEXT "File &name:", -1, 6, 6, 60, 9
+    EDITTEXT IDC_NAME, 6, 16, 90, 12, ES_AUTOHSCROLL
+    LISTBOX IDC_FILES, 6, 32, 90, 90, LBS_STANDARD
+    LTEXT "Directory:", -1, 104, 6, 50, 9
+    LTEXT "", IDC_PATH, 104, 16, 110, 9
+    LTEXT "&Directories:", -1, 104, 26, 60, 9
+    LISTBOX IDC_DIRS, 104, 36, 60, 86, LBS_STANDARD
+    DEFPUSHBUTTON "OK", IDOK, 170, 36, 44, 14
+    PUSHBUTTON "Cancel", IDCANCEL, 170, 54, 44, 14
+END
+
+ABOUTDLG DIALOG 30, 30, 200, 80
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About RetroPlayer 16"
+FONT 8, "Helv"
+BEGIN
+    ICON "RETRO16", -1, 8, 8, 18, 20
+    LTEXT "RetroPlayer 16 - native media player for Windows 3.0 and 3.1", -1, 36, 8, 158, 18
+    LTEXT "", IDC_ABOUTINFO, 36, 30, 158, 18
+    DEFPUSHBUTTON "OK", IDOK, 78, 58, 44, 14
+END

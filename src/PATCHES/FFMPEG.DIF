@@ -1,0 +1,305 @@
+--- a/configure
++++ b/configure
+@@ -5886,7 +5886,10 @@
+         i[345]86|pentium)
+             cpuflags="-march=$cpu"
+             disable i686
+-            disable mmx
++            # Keep the scalar compiler baseline while allowing separately
++            # dispatched assembler on newer processors in the same binary.
++            # --disable-asm still disables all optimized implementations.
++            enabled runtime_cpudetect || disable mmx
+         ;;
+         # targets that do NOT support nopl and conditional mov (cmov)
+         pentium-mmx|k6|k6-[23]|winchip-c6|winchip2|c3)
+@@ -6349,7 +6352,7 @@
+         if ! test_${pfx}cpp_condition crtdefs.h "defined(_UCRT)"; then
+             add_${pfx}cppflags -D__USE_MINGW_ANSI_STDIO=1
+         fi
+-        test_${pfx}cpp_condition windows.h "!defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600" &&
++        test_${pfx}cpp_condition windows.h "!defined(RP_LEGACY) && (!defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600)" &&
+             add_${pfx}cppflags -D_WIN32_WINNT=0x0600
+         add_${pfx}cppflags -D_POSIX_C_SOURCE=200112 -D_XOPEN_SOURCE=600
+     elif test_${pfx}cpp_condition _mingw.h "defined __MINGW_VERSION"  ||
+@@ -6364,7 +6367,7 @@
+         fi
+         test_${pfx}cpp_condition _mingw.h "__MSVCRT_VERSION__ < 0x0700" &&
+             add_${pfx}cppflags -D__MSVCRT_VERSION__=0x0700
+-        test_${pfx}cpp_condition windows.h "!defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600" &&
++        test_${pfx}cpp_condition windows.h "!defined(RP_LEGACY) && (!defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600)" &&
+             add_${pfx}cppflags -D_WIN32_WINNT=0x0600
+         add_${pfx}cppflags -D_POSIX_C_SOURCE=200112 -D_XOPEN_SOURCE=600
+     elif test_${pfx}cpp_condition crtversion.h "defined _VC_CRT_MAJOR_VERSION"; then
+@@ -6835,10 +6838,15 @@
+     if check_headers arpa/inet.h ; then
+         check_func closesocket
+     elif check_headers winsock2.h ; then
++        if test_cpp_condition windows.h "defined(RP_LEGACY)"; then
++            check_func_headers winsock2.h closesocket -lwsock32 &&
++                network_extralibs="-lwsock32" || disable winsock2_h network
++        else
+         check_func_headers winsock2.h closesocket -lws2 &&
+             network_extralibs="-lws2" ||
+         { check_func_headers winsock2.h closesocket -lws2_32 &&
+             network_extralibs="-lws2_32"; } || disable winsock2_h network
++        fi
+         check_func_headers ws2tcpip.h getaddrinfo $network_extralibs
+ 
+         check_type ws2tcpip.h socklen_t
+@@ -7009,8 +7017,15 @@
+ done
+ 
+ check_lib advapi32 "windows.h"            RegCloseKey          -ladvapi32
+-check_lib bcrypt   "windows.h bcrypt.h"   BCryptGenRandom      -lbcrypt &&
+-    check_cpp_condition bcrypt bcrypt.h "defined BCRYPT_RNG_ALGORITHM"
++# The legacy OS may have no cryptographic provider. Do not bind a Vista DLL
++# or report a weak seed as cryptographic random bytes. av_random_bytes keeps
++# its explicit failure; av_get_random_seed retains its upstream fallback.
++if test_cpp_condition windows.h "defined(RP_LEGACY)"; then
++    disable bcrypt
++else
++    check_lib bcrypt "windows.h bcrypt.h" BCryptGenRandom -lbcrypt &&
++        check_cpp_condition bcrypt bcrypt.h "defined BCRYPT_RNG_ALGORITHM"
++fi
+ check_lib ole32    "windows.h objbase.h"  CoTaskMemFree        -lole32
+ check_lib shell32  "windows.h shellapi.h" CommandLineToArgvW   -lshell32
+ check_lib psapi    "windows.h psapi.h"    GetProcessMemoryInfo -lpsapi
+@@ -7137,7 +7152,9 @@
+ check_cpp_condition winrt windows.h "!WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)"
+ 
+ if ! disabled w32threads && ! enabled pthreads; then
+-    check_func_headers "windows.h process.h" _beginthreadex &&
++    thread_start_func=_beginthreadex
++    test_cpp_condition windows.h "defined(RP_LEGACY)" && thread_start_func=_beginthread
++    check_func_headers "windows.h process.h" $thread_start_func &&
+         check_type "windows.h" CONDITION_VARIABLE &&
+         check_type "windows.h" INIT_ONCE &&
+         enable w32threads || disable w32threads
+--- a/libavutil/wchar_filename.h
++++ b/libavutil/wchar_filename.h
+@@ -24,6 +24,10 @@
+ #include <errno.h>
+ #include <stddef.h>
+ #include <windows.h>
++#if defined(RP_LEGACY) && !defined(WC_ERR_INVALID_CHARS)
++/* Implemented by RPKERN for UTF-8 on all supported systems. */
++#define WC_ERR_INVALID_CHARS 0x00000080
++#endif
+ #include "mem.h"
+ 
+ av_warn_unused_result
+--- a/compat/w32pthreads.h
++++ b/compat/w32pthreads.h
+@@ -51,6 +51,10 @@
+     void *(*func)(void* arg);
+     void *arg;
+     void *ret;
++#ifdef RP_LEGACY
++    HANDLE gate;
++    int cancelled;
++#endif
+ } *pthread_t;
+ 
+ /* use light weight mutex/condition variable API for Windows Vista and later */
+@@ -60,8 +64,10 @@
+ #define PTHREAD_MUTEX_INITIALIZER SRWLOCK_INIT
+ #define PTHREAD_COND_INITIALIZER CONDITION_VARIABLE_INIT
+ 
++#ifndef RP_LEGACY
+ #define InitializeCriticalSection(x) InitializeCriticalSectionEx(x, 0, 0)
+ #define WaitForSingleObject(a, b) WaitForSingleObjectEx(a, b, FALSE)
++#endif
+ 
+ #define PTHREAD_CANCEL_ENABLE 1
+ #define PTHREAD_CANCEL_DISABLE 0
+@@ -80,6 +86,22 @@
+     return 0;
+ }
+ 
++#ifdef RP_LEGACY
++/* CRTDLL closes the original thread handle on exit. Keep the worker gated
++ * until its joinable duplicate and arguments have been published. */
++av_unused static void __cdecl legacy_thread_worker(void *arg)
++{
++    pthread_t thread = arg;
++    DWORD result = WaitForSingleObject(thread->gate, INFINITE);
++    CloseHandle(thread->gate);
++    if (result != WAIT_OBJECT_0 || thread->cancelled)
++        av_free(thread);
++    else
++        win32thread_worker(thread);
++    _endthread();
++}
++#endif
++
+ av_unused static int pthread_create(pthread_t *thread, const void *unused_attr,
+                                     void *(*start_routine)(void*), void *arg)
+ {
+@@ -91,7 +113,24 @@
+ 
+     ret->func   = start_routine;
+     ret->arg    = arg;
+-#if HAVE_WINRT
++#if defined(RP_LEGACY)
++    ret->gate = CreateEventA(NULL, TRUE, FALSE, NULL);
++    if (!ret->gate) { av_free(ret); return EAGAIN; }
++    uintptr_t original = _beginthread(legacy_thread_worker, 0, ret);
++    if (original == (uintptr_t)-1) {
++        CloseHandle(ret->gate); av_free(ret); return EAGAIN;
++    }
++    if (!DuplicateHandle(GetCurrentProcess(), (HANDLE)original,
++                         GetCurrentProcess(), &ret->handle, 0, FALSE,
++                         DUPLICATE_SAME_ACCESS)) {
++        ret->cancelled = 1;
++        SetEvent(ret->gate); /* The cancelled worker releases its own storage. */
++        return EAGAIN;
++    }
++    *thread = ret;
++    SetEvent(ret->gate);
++    return 0;
++#elif HAVE_WINRT
+     ret->handle = (void*)CreateThread(NULL, 0, win32thread_worker, ret,
+                                       0, NULL);
+ #else
+@@ -152,10 +191,13 @@
+ av_unused static int pthread_once(pthread_once_t *once_control, void (*init_routine)(void))
+ {
+     BOOL pending = FALSE;
+-    InitOnceBeginInitialize(once_control, 0, &pending, NULL);
+-    if (pending)
++    if (!InitOnceBeginInitialize(once_control, 0, &pending, NULL))
++        return EINVAL;
++    if (pending) {
+         init_routine();
+-    InitOnceComplete(once_control, 0, NULL);
++        if (!InitOnceComplete(once_control, 0, NULL))
++            return EINVAL;
++    }
+     return 0;
+ }
+ 
+@@ -179,8 +221,7 @@
+ 
+ static inline int pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
+ {
+-    SleepConditionVariableSRW(cond, mutex, INFINITE, 0);
+-    return 0;
++    return SleepConditionVariableSRW(cond, mutex, INFINITE, 0) ? 0 : EINVAL;
+ }
+ 
+ static inline int pthread_cond_timedwait(pthread_cond_t *cond, pthread_mutex_t *mutex,
+--- a/libavformat/udp.c
++++ b/libavformat/udp.c
+@@ -536,26 +536,50 @@
+ 
+     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelstate);
+     pthread_mutex_lock(&s->mutex);
+-    if (ff_socket_nonblock(s->udp_fd, 0) < 0) {
++    if (ff_socket_nonblock(s->udp_fd,
++#ifdef RP_LEGACY
++                          1
++#else
++                          0
++#endif
++                         ) < 0) {
+         av_log(h, AV_LOG_ERROR, "Failed to set blocking mode");
+         s->circular_buffer_error = AVERROR(EIO);
+         goto end;
+     }
+     while(1) {
+         UDPQueuedPacketHeader pkt_header;
++#ifdef RP_LEGACY
++        if (s->close_req)
++            goto end;
++#endif
+         pkt_header.addr_len = sizeof(pkt_header.addr);
+ 
+         pthread_mutex_unlock(&s->mutex);
++#ifdef RP_LEGACY
++        /* Original Winsock has no CancelIoEx. A bounded readiness wait and
++         * nonblocking recv let close join the worker without a fake cancel. */
++        int readiness = ff_network_wait_fd(s->udp_fd, 0);
++        if (readiness < 0) {
++            pthread_mutex_lock(&s->mutex);
++            if (readiness != AVERROR(EAGAIN) && readiness != AVERROR(EINTR)) {
++                s->circular_buffer_error = readiness;
++                goto end;
++            }
++            continue;
++        }
++#endif
+         /* Blocking operations are always cancellation points;
+            see "General Information" / "Thread Cancellation Overview"
+            in Single Unix. */
+         pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &old_cancelstate);
+         pkt_header.pkt_size = recvfrom(s->udp_fd, s->tmp + sizeof(pkt_header), sizeof(s->tmp) - sizeof(pkt_header), 0, (struct sockaddr *)&pkt_header.addr, &pkt_header.addr_len);
++        int receive_error = pkt_header.pkt_size < 0 ? ff_neterrno() : 0;
+         pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancelstate);
+         pthread_mutex_lock(&s->mutex);
+         if (pkt_header.pkt_size < 0) {
+-            if (ff_neterrno() != AVERROR(EAGAIN) && ff_neterrno() != AVERROR(EINTR)) {
+-                s->circular_buffer_error = ff_neterrno();
++            if (receive_error != AVERROR(EAGAIN) && receive_error != AVERROR(EINTR)) {
++                s->circular_buffer_error = receive_error;
+                 goto end;
+             }
+             continue;
+@@ -1113,7 +1137,12 @@
+         int ret;
+         // Cancel only read, as write has been signaled as success to the user
+         if (h->flags & AVIO_FLAG_READ) {
+-#ifdef _WIN32
++#if defined(RP_LEGACY)
++            pthread_mutex_lock(&s->mutex);
++            s->close_req = 1;
++            pthread_cond_signal(&s->cond);
++            pthread_mutex_unlock(&s->mutex);
++#elif defined(_WIN32)
+             /* recvfrom() is not a cancellation point for win32, so we shutdown
+              * the socket and abort pending IO, subsequent recvfrom() calls
+              * will fail with WSAESHUTDOWN causing the thread to exit. */
+--- a/libavutil/x86/cpu.c
++++ b/libavutil/x86/cpu.c
+@@ -28,6 +28,20 @@
+ #include "libavutil/cpu.h"
+ #include "libavutil/cpu_internal.h"
+ 
++#if defined(RP_LEGACY) && defined(_WIN32)
++#include <windows.h>
++/* CPUID describes silicon, not the kernel's extended-state context switch.
++ * Win95 and early NT must never dispatch XMM code merely because a newer CPU
++ * was installed. A missing OS capability query is conservatively false. */
++static int rp_os_xmm(void)
++{
++    typedef BOOL (WINAPI *feature_query)(DWORD);
++    feature_query query = (feature_query)GetProcAddress(
++        GetModuleHandleA("KERNEL32.DLL"), "IsProcessorFeaturePresent");
++    return query && query(6); /* PF_XMMI_INSTRUCTIONS_AVAILABLE */
++}
++#endif
++
+ #if HAVE_X86ASM
+ 
+ #define cpuid(index, eax, ebx, ecx, edx)        \
+@@ -81,6 +95,7 @@
+     get_eflags(a);
+     set_eflags(a ^ 0x200000);
+     get_eflags(c);
++    set_eflags(a);
+ 
+     return a != c;
+ }
+@@ -254,6 +269,13 @@
+ 
+ #endif /* cpuid */
+ 
++#if defined(RP_LEGACY) && defined(_WIN32)
++    if (!rp_os_xmm())
++        rval &= AV_CPU_FLAG_MMX | AV_CPU_FLAG_MMXEXT | AV_CPU_FLAG_3DNOW |
++                AV_CPU_FLAG_3DNOWEXT | AV_CPU_FLAG_CMOV |
++                AV_CPU_FLAG_BMI1 | AV_CPU_FLAG_BMI2;
++#endif
++
+     return rval;
+ }
+ 

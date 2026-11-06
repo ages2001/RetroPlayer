@@ -1,0 +1,10 @@
+--- a/include/share/compat.h
++++ b/include/share/compat.h
+@@ -41,6 +41,7 @@
+ 
+ #include <stddef.h>
+ #include <stdarg.h>
++#include <stdio.h> /* Declare CRT stream functions before the MinGW aliases. */
+ 
+ #if defined _WIN32 && !defined __CYGWIN__
+ /* where MSVC puts unlink() */

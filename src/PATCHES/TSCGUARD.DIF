@@ -1,0 +1,50 @@
+--- a/src/win32/RPCLOCK.H
++++ b/src/win32/RPCLOCK.H
+@@ -43,6 +43,12 @@
+     if (!rp_tsc_available() || !QueryPerformanceFrequency(&frequency) ||
+         frequency.QuadPart <= 0 || frequency.QuadPart > 10000000000LL)
+         return false;
++    HMODULE timer = GetModuleHandleA("winmm.dll");
++    DWORD (WINAPI *read_ms)(void) = timer ?
++        (void *)GetProcAddress(timer, "timeGetTime") : NULL;
++    if (!read_ms) return false;
++    const DWORD start_ms = read_ms();
++    const uint64_t start_ticks = rp_tsc_read();
+     /* Calibrate while the output is still inactive. Lost PIT ticks inflate
+      * an interval's estimated frequency; require a consistent low cluster.
+      * Never calibrate against a hardcoded CPU model or a host MHz value. */
+@@ -50,7 +56,7 @@
+         LARGE_INTEGER before, after;
+         if (!QueryPerformanceCounter(&before)) return false;
+         uint64_t start = rp_tsc_read();
+-        Sleep(40);
++        Sleep(100);
+         if (!QueryPerformanceCounter(&after)) return false;
+         uint64_t end = rp_tsc_read();
+         int64_t elapsed = after.QuadPart - before.QuadPart;
+@@ -69,8 +75,25 @@
+         }
+         rates[j] = rate;
+     }
++    const uint64_t end_ticks = rp_tsc_read();
++    const DWORD elapsed_ms = read_ms() - start_ms;
++    if (elapsed_ms < 500 || elapsed_ms > 5000 || end_ticks <= start_ticks)
++        return false;
+     for (unsigned i = 0; i + 2 < count; ++i) {
+         if (rates[i + 2] - rates[i] > rates[i] / 400) continue;
++        /* A stable QPC rate can still be wrong: the supplied NT3.51 HAL
++         * reports about 2.7% less elapsed time than multimedia and audio.
++         * Cross-check the entire idle calibration against timeGetTime.
++         * Allow its requested 5 ms resolution plus 0.5% rate difference;
++         * do not use a consistent but mis-scaled counter as a reference. */
++        const uint64_t ticks = end_ticks - start_ticks;
++        const uint64_t rate = rates[i + 1];
++        const uint64_t elapsed_us = ticks / rate * CLOCK_FREQ +
++            ticks % rate * CLOCK_FREQ / rate;
++        const uint64_t reference_us = (uint64_t)elapsed_ms * 1000;
++        const uint64_t error_us = elapsed_us > reference_us ?
++            elapsed_us - reference_us : reference_us - elapsed_us;
++        if (error_us > 5000 + reference_us / 200) return false;
+         rp_tsc_clock.frequency = rates[i + 1];
+         rp_tsc_clock.epoch = (vlc_tick_t)GetTickCount() * 1000 + 1;
+         rp_tsc_clock.origin = rp_tsc_read();

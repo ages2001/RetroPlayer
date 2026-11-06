@@ -1,0 +1,170 @@
+--- a/modules/audio_output/waveout.c
++++ b/modules/audio_output/waveout.c
+@@ -135,7 +135,7 @@
+     block_t *p_prebuffer;
+     vlc_tick_t i_prebuffer_length;
+     unsigned i_prebuffer_samples;
+-    WAVEHDR latency_header;
++    WAVEHDR latency_headers[16];
+     vlc_tick_t i_device_latency;
+ 
+     int i_repeat_counter;
+@@ -377,7 +377,7 @@
+         msg_Warn(p_aout, "waveOutPause unavailable; startup prebuffering disabled");
+     p_aout->sys->p_free_list = NULL;
+     p_aout->sys->i_device_latency = 0;
+-    memset(&p_aout->sys->latency_header, 0, sizeof(p_aout->sys->latency_header));
++    memset(p_aout->sys->latency_headers, 0, sizeof(p_aout->sys->latency_headers));
+     /* AUDIONT can start a cold DMA ring immediately but resume a warm ring
+      * with render-ahead latency. The second probe measures the reset/restart
+      * path which the first real media block will use. */
+@@ -399,54 +399,66 @@
+                                   const audio_sample_format_t *fmt)
+ {
+     aout_sys_t *sys = aout->sys;
+-    const unsigned frames = fmt->i_rate / 10;
++    /* Keep the render-ahead ring supplied while observing its first 40 ms.
++     * A single 100 ms probe can run dry with a 70 ms hardware lead, making
++     * its reset/restart latency unlike the later continuous media stream.
++     * Separate <=32 KiB headers also respect Win9x's 16-bit mapper. */
++    if (!fmt->i_bytes_per_frame) return false;
++    const unsigned frames = __MIN(fmt->i_rate / 10,
++                                  32768 / fmt->i_bytes_per_frame);
++    if (!frames) return false;
++    const unsigned target = fmt->i_rate / 4;
++    const unsigned count = target / frames + (target % frames != 0);
++    if (!count || count > ARRAY_SIZE(sys->latency_headers)) return false;
+     const size_t bytes = (size_t)frames * fmt->i_bytes_per_frame;
+-    if( !frames || !bytes ) return false;
+-    WAVEHDR *header = &sys->latency_header;
+-    memset(header, 0, sizeof(*header));
+-    header->lpData = calloc(1, bytes);
+-    if( !header->lpData ) return false;
+-    header->dwBufferLength = bytes;
+-    bool prepared = false, measured = false;
++    bool prepared[16] = { false };
++    bool queued = true, measured = false;
+     vlc_tick_t latency = INT64_MAX;
+-    if( waveOutPrepareHeader(sys->h_waveout, header, sizeof(*header)) == MMSYSERR_NOERROR )
+-    {
+-        prepared = true;
+-        if( waveOutWrite(sys->h_waveout, header, sizeof(*header)) == MMSYSERR_NOERROR )
+-        {
+-            const vlc_tick_t start = mdate();
+-            if( waveOutRestart(sys->h_waveout) == MMSYSERR_NOERROR )
+-            {
+-                for( ;; )
+-                {
+-                    MMTIME pos;
+-                    pos.wType = TIME_SAMPLES;
+-                    if( waveOutGetPosition(sys->h_waveout, &pos, sizeof(pos)) != MMSYSERR_NOERROR ||
+-                        pos.wType != TIME_SAMPLES ) break;
+-                    vlc_tick_t elapsed = mdate() - start;
+-                    if( pos.u.sample >= fmt->i_rate / 100 && pos.u.sample < frames )
+-                    {
+-                        vlc_tick_t estimate = elapsed - (vlc_tick_t)pos.u.sample * CLOCK_FREQ / fmt->i_rate;
+-                        if( estimate < latency ) latency = estimate;
+-                        measured = true;
+-                    }
+-                    if( pos.u.sample >= 4 * frames / 10 || elapsed >= 500 * 1000 ) break;
+-                    msleep(2 * 1000);
++    for (unsigned i = 0; i < count; ++i) {
++        WAVEHDR *header = &sys->latency_headers[i];
++        memset(header, 0, sizeof(*header));
++        header->lpData = calloc(1, bytes);
++        if (!header->lpData) { queued = false; break; }
++        header->dwBufferLength = bytes;
++        if (waveOutPrepareHeader(sys->h_waveout, header, sizeof(*header)) != MMSYSERR_NOERROR) {
++            queued = false; break;
++        }
++        prepared[i] = true;
++        if (waveOutWrite(sys->h_waveout, header, sizeof(*header)) != MMSYSERR_NOERROR) {
++            queued = false; break;
++        }
++    }
++    if (queued) {
++        const vlc_tick_t start = mdate();
++        if (waveOutRestart(sys->h_waveout) == MMSYSERR_NOERROR) {
++            for (;;) {
++                MMTIME pos;
++                pos.wType = TIME_SAMPLES;
++                if (waveOutGetPosition(sys->h_waveout, &pos, sizeof(pos)) != MMSYSERR_NOERROR ||
++                    pos.wType != TIME_SAMPLES) break;
++                vlc_tick_t elapsed = mdate() - start;
++                if (pos.u.sample >= fmt->i_rate / 100 && pos.u.sample < frames * count) {
++                    vlc_tick_t estimate = elapsed - (vlc_tick_t)pos.u.sample * CLOCK_FREQ / fmt->i_rate;
++                    if (estimate < latency) latency = estimate;
++                    measured = true;
+                 }
++                if (pos.u.sample >= fmt->i_rate / 25 || elapsed >= 500 * 1000) break;
++                msleep(2 * 1000);
+             }
+         }
+     }
+-    if( waveOutReset(sys->h_waveout) != MMSYSERR_NOERROR ) measured = false;
+-    if( !prepared || waveOutUnprepareHeader(sys->h_waveout, header, sizeof(*header)) == MMSYSERR_NOERROR )
+-    {
+-        free(header->lpData);
+-        header->lpData = NULL;
+-    }
+-    else
+-    {
+-        /* Keep driver-owned memory alive; Stop retries after its reset. */
+-        measured = false;
+-        msg_Warn(aout, "waveOut latency buffer remains prepared");
++    if (waveOutReset(sys->h_waveout) != MMSYSERR_NOERROR) measured = false;
++    for (unsigned i = 0; i < count; ++i) {
++        WAVEHDR *header = &sys->latency_headers[i];
++        if (!header->lpData) continue;
++        if (!prepared[i] || waveOutUnprepareHeader(sys->h_waveout, header, sizeof(*header)) == MMSYSERR_NOERROR) {
++            free(header->lpData);
++            header->lpData = NULL;
++        } else {
++            /* Keep driver-owned memory alive; Stop retries after its reset. */
++            measured = false;
++            msg_Warn(aout, "waveOut latency buffer remains prepared");
++        }
+     }
+     sys->b_start_pending = waveOutPause(sys->h_waveout) == MMSYSERR_NOERROR;
+     if( measured && sys->b_start_pending )
+@@ -638,9 +650,10 @@
+     WaveOutFlush( p_aout, true );
+     WaveOutClean( p_aout->sys );
+ 
+-    if( p_sys->latency_header.lpData )
+-        waveOutUnprepareHeader(p_sys->h_waveout, &p_sys->latency_header,
+-                               sizeof(p_sys->latency_header));
++    for (unsigned i = 0; i < ARRAY_SIZE(p_sys->latency_headers); ++i)
++        if (p_sys->latency_headers[i].lpData)
++            waveOutUnprepareHeader(p_sys->h_waveout, &p_sys->latency_headers[i],
++                                   sizeof(p_sys->latency_headers[i]));
+     /* now we can Close the device */
+     if( waveOutClose( p_sys->h_waveout ) != MMSYSERR_NOERROR )
+     {
+@@ -648,8 +661,10 @@
+     }
+     else
+     {
+-        free(p_sys->latency_header.lpData);
+-        p_sys->latency_header.lpData = NULL;
++        for (unsigned i = 0; i < ARRAY_SIZE(p_sys->latency_headers); ++i) {
++            free(p_sys->latency_headers[i].lpData);
++            p_sys->latency_headers[i].lpData = NULL;
++        }
+     }
+ 
+     free( p_sys->p_silence_buffer );
+@@ -892,9 +907,10 @@
+     struct lkwavehdr * p_waveheader =  (struct lkwavehdr *) dwParam1;
+ 
+     if( uMsg != WOM_DONE ) return;
+-    /* The embedded calibration header is not a queued VLC block. Its
+-     * address stays valid until waveOutClose drains driver callbacks. */
+-    if( (WAVEHDR *)dwParam1 == &p_aout->sys->latency_header ) return;
++    /* Calibration headers are not queued VLC blocks. Their addresses stay
++     * valid until waveOutClose drains driver callbacks. */
++    for (unsigned i = 0; i < ARRAY_SIZE(p_aout->sys->latency_headers); ++i)
++        if ((WAVEHDR *)dwParam1 == &p_aout->sys->latency_headers[i]) return;
+ 
+     vlc_mutex_lock( &p_aout->sys->lock );
+     p_waveheader->p_next = p_aout->sys->p_free_list;

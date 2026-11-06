@@ -1,0 +1,90 @@
+--- a/src/input/decoder.c
++++ b/src/input/decoder.c
+@@ -1033,7 +1033,19 @@
+     /* */
+     vlc_mutex_lock( &p_owner->lock );
+ 
+-    if( p_owner->b_waiting && !p_owner->b_first )
++#ifdef RP_LEGACY
++    /* The first decoded picture is sufficient to release input buffering.
++     * Keep the normal playing picture until the shared clock is rebased;
++     * a paused seek still needs the immediate first-picture preview. The
++     * owner lock is already held, matching input_DecoderWait's lock order. */
++    vlc_fifo_Lock( p_owner->p_fifo );
++    const bool b_clocked_first = p_owner->b_waiting && p_owner->b_first
++                             && !p_owner->paused;
++    vlc_fifo_Unlock( p_owner->p_fifo );
++#else
++    const bool b_clocked_first = false;
++#endif
++    if( p_owner->b_waiting && (!p_owner->b_first || b_clocked_first) )
+     {
+         p_owner->b_has_data = true;
+         vlc_cond_signal( &p_owner->wait_acknowledge );
+@@ -1041,6 +1053,9 @@
+     bool b_first_after_wait = p_owner->b_waiting && p_owner->b_has_data;
+ 
+     DecoderWaitUnblock( p_dec );
++
++    if( b_clocked_first )
++        p_owner->b_first = false;
+ 
+     if( p_owner->b_waiting )
+     {
+@@ -1060,6 +1075,8 @@
+     /* FIXME: The *input* FIFO should not be locked here. This will not work
+      * properly if/when pictures are queued asynchronously. */
+     vlc_fifo_Lock( p_owner->p_fifo );
++    if( b_clocked_first )
++        p_picture->b_force = p_owner->paused;
+     if( unlikely(p_owner->paused) && likely(p_owner->frames_countdown > 0) )
+         p_owner->frames_countdown--;
+     vlc_fifo_Unlock( p_owner->p_fifo );
+--- a/src/win32/thread.c
++++ b/src/win32/thread.c
+@@ -949,12 +949,32 @@
+     const char *name = "perf";
+ #else
+     const char *name = "multimedia";
++#ifdef RP_LEGACY
++    /* Win9x multimedia time can lag during legacy GUI/driver work. Prefer
++     * its hardware-backed counter when available; retain multimedia time
++     * for machines without a usable counter and honor an explicit option. */
++    LARGE_INTEGER frequency;
++    if ((GetVersion() & 0x80000000UL) &&
++        QueryPerformanceFrequency(&frequency) && frequency.QuadPart > 0)
++        name = "perf";
++#endif
+ #endif
+     char *str = NULL;
+     if (obj != NULL)
+         str = var_InheritString(obj, "clock-source");
+     if (str != NULL)
+         name = str;
++#if defined(RP_LEGACY) && !VLC_WINSTORE_APP
++    /* Clock precision and scheduler resolution are independent. Keep the
++     * same period request when selecting the performance counter. */
++    HMODULE timer_module = LoadLibrary(TEXT("winmm.dll"));
++    if (timer_module != NULL) {
++        MMRESULT (WINAPI *begin_period)(UINT) =
++            (void *)GetProcAddress(timer_module, "timeBeginPeriod");
++        if (begin_period != NULL)
++            begin_period(5);
++    }
++#endif
+     if (!strcmp (name, "interrupt"))
+     {
+         msg_Dbg (obj, "using interrupt time as clock source");
+@@ -1007,8 +1027,12 @@
+         mdate_selected = mdate_multimedia;
+ 
+         timeBeginPeriod = (void*)GetProcAddress(hWinmm, "timeBeginPeriod");
++#ifndef RP_LEGACY
+         if (timeBeginPeriod != NULL)
+             timeBeginPeriod(5);
++#else
++        (void)timeBeginPeriod;
++#endif
+     }
+ #endif
+     else

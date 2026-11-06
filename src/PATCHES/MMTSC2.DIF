@@ -1,0 +1,13 @@
+--- a/src/win32/RPCLOCK.H
++++ b/src/win32/RPCLOCK.H
+@@ -44,6 +44,10 @@
+     DWORD (WINAPI *read_ms)(void) = timer ?
+         (void *)GetProcAddress(timer, "timeGetTime") : NULL;
+     if (!read_ms) return false;
++    /* timeBeginPeriod can change the legacy clock's phase. On the supplied
++     * NT3.51 system its first interval jumps by about 14 ms. Let that change
++     * settle before taking the first calibration endpoint. */
++    Sleep(250);
+     /* The supplied NT3.51 HAL has a stable but incorrectly scaled QPC.
+      * Use the multimedia clock only during an idle calibration, before
+      * decoding/GDI can lose its timer interrupts. A long aggregate interval

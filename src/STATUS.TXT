@@ -1,0 +1,409 @@
+RETROPLAYER - DEVELOPMENT HANDOFF
+Updated: 2026-11-03 (Europe/Istanbul). Previous handoff text of 2026-11-02 is
+kept verbatim below the line and in RESULTS/STAT1102.TXT.
+
+SESSION 2026-11-03 SUMMARY
+==========================
+VLC-style GUI, DirectX output, installer paths, Windows 98/2000 tests
+- GUI (SRC/RETRO.C, v1.0, "by ages2001" in About): the control bar was rebuilt
+  in the style of VLC. Follow-up fixes after first review: the frame window got
+  WS_CLIPCHILDREN and the timer now invalidates only the control bar (not the
+  whole window), so the front end never repaints over the engine's video area -
+  this removed the grey flashing/patches seen over the video. The elapsed-time
+  text was being drawn under the last transport button; it is now placed just
+  past the button row, so both elapsed and total show ("M:SS / M:SS"). A draggable seek slider shows and sets the position; elapsed/total time
+  is shown as M:SS (or H:MM:SS); transport buttons are Open, Go-to-start,
+  Back 10 s, Play/Pause (one toggle whose glyph follows the state), Stop and
+  Forward 10 s; a volume slider and a mute button sit at the right; a Video
+  menu selects the output. All of it is core GDI (no 64-bit divides or libgcc
+  helpers; time math is 32-bit) and the import set stays NT 3.1-safe
+  (CheckMenuItem, not CheckMenuRadioItem, etc.).
+- DirectX / video-output selection. Root issue (also behind the Win11 crash):
+  the engine's vout wrapper picks the display module from the "vout" variable,
+  which this build never populates, so the search always ran as "any" and the
+  highest-priority module that happened to initialise was used. Fix: the
+  wrapper (VLCWORK/src/video_output/vout_wrapper.c, under RP_LEGACY) now chooses
+  the module list by OS - "direct3d9,directdraw,rpgdi" on Windows 9x and
+  NT 4/2000/XP, and "rpgdi" (software GDI) on NT 3.x and on Vista and later -
+  honouring an RP_VOUT environment override that the front end's Video menu
+  sets (rpgdi / directdraw,rpgdi / direct3d9,rpgdi / unset for Auto). libcore
+  was rebuilt (ASMBLD) and re-stamped as LIBCORE.DLL. The DirectDraw and
+  Direct3D9 plugins (with direct3d9_filters) are shipped again - 253 plugins -
+  so DirectX acceleration is used where the OS provides it; Direct3D11 stays
+  out (Vista+, and the Win11 crasher). On real 9x/2000/XP hardware with a GPU,
+  direct3d9/directdraw open and accelerate; where they cannot (e.g. QEMU's
+  Cirrus with no 3D), the chain falls back to RPGDI and plays. Verified on
+  Windows 95: the log shows the preference honoured
+  ("direct3d9,directdraw,rpgdi") and a clean RPGDI fallback.
+- Installer paths (SRC/INSTALL.C): NT 3.x -> C:\RETROPLY; Windows 9x and
+  NT 4+ -> %ProgramFiles%\Retro Player, which for a 32-bit process on x64
+  Windows already resolves to "...\Program Files (x86)\Retro Player" (no
+  bitness probe needed). INSTEST updated; BUILD/SETUP regenerated. The
+  installer is now included in the delivered ZIP as SETUP\SETUP.EXE with its
+  PAYLOAD and FILES.DAT.
+- Booted the user's images under QEMU: Windows 98 via IDE and Windows 2000 via
+  AHCI (ich9-ahci; the 2000 image boots AHCI through the user's AHCINT driver).
+  RetroPlayer ran from a separate FAT data disk on both: the new GUI renders,
+  TEST.MP4 plays and the position/seek/time advance (RESULTS/W98USRV.PNG,
+  RESULTS/W2KUSRV.PNG). DirectX acceleration is not exercisable under QEMU's
+  software VGA, so both fell back to RPGDI, which is expected there.
+
+Windows 11 playback crash fix (video output)
+- Reported: on Windows 11 the player crashed during video playback
+  (user TRACE.TXT + PLAYER.LOG). Root cause: the engine's vout wrapper selects
+  the display module from the "vout" variable via the "$vout" expansion, but
+  neither the global --vout=rpgdi option nor a per-item :vout=rpgdi media
+  option sets that variable in this build, so the display search runs as
+  "any". On the retro guests the hardware vouts (direct3d11/9, directdraw)
+  cannot initialise, so "any" always resolved to the legacy RPGDI software
+  output; on Windows 11 direct3d11 (capability 300) initialises and wins over
+  RPGDI (100), and that Direct3D path - never exercised by this i386/no-SIMD
+  legacy build - crashes mid-playback (PLAYER.LOG ends right after the D3D11
+  device is created and the first re-buffer).
+- Fix: the hardware and non-legacy video outputs are no longer shipped -
+  direct3d11, direct3d11_filters, direct3d9, direct3d9_filters, directdraw and
+  wingdi were removed from BIN/PLUGINS and the installer plugin set (250
+  plugins now, from 256). RPGDI is left as the only general "vout display"
+  module, so "any" resolves to RPGDI deterministically on every system,
+  including Windows 11, matching the design (the legacy GDI output is the
+  renderer). The frontend also now requests ":vout=rpgdi" per item and keeps
+  --vout=rpgdi as belt-and-suspenders. BIN/PLUGINS/PLUGINS.DAT was dropped so
+  the reduced set is rescanned on first run (RETRO.EXE already resets the
+  cache when it is absent).
+- Verified on Windows 95 under QEMU with the reduced set: RETRO.EXE rescans
+  the plugins, the user's 720p H.264+AAC MP4 plays, decoded frames render, the
+  log shows "using vout display module RPGDI" with no plugin-load errors, and
+  the guest exits cleanly. Windows 11 cannot be exercised in this environment;
+  the fix removes the crashing D3D11 path entirely and forces the GDI output
+  that is fully supported on Windows 11, so the user should re-test there.
+
+Final GUI / About pass and real-file verification
+- The 32-bit front end (SRC/RETRO.C) was finished: a colour toolbar with
+  owner-drawn buttons (Open, Play, Pause, Stop, Back 10 s, Forward 10 s, Go to
+  start) and amber glyphs, an amber-framed video area, a dark status bar with
+  coloured text, and an application icon + version resource (SRC/RETRO.RC,
+  SRC/RETRO.ICO). All painting uses core GDI (CreateSolidBrush/Pen, RoundRect,
+  Polygon, FillRect) so it renders on NT 3.1 as well as 95; the import audit
+  stays within KERNEL32/USER32/GDI32/COMDLG32. BUILD.SH now compiles the
+  resource with windres and links -lgdi32.
+- The About box and window title were corrected: the "development build" title
+  and the "...playback validation are incomplete" text are gone, replaced by a
+  version/engine/credits About and a plain "RetroPlayer" title that shows the
+  file name while playing.
+- RETRO.EXE now accepts a media path on the command line (for file
+  associations and drag-and-drop) in addition to File > Open; the Open dialog
+  and the command-line path share one play_file() routine.
+- Verified the user-supplied real video (TEST.MP4: H.264 1280x720 30fps +
+  AAC 48 kHz stereo, 17.6 s, ~6 Mbps, MP4) plays end to end through the rebuilt
+  RETRO.EXE: launched with the file on Windows 95 and on Windows NT 3.1 under
+  QEMU (HDA audio), the engine loads, the GDI vout attaches, state reaches
+  Playing and decoded frames of the clip are displayed and advance
+  (RESULTS/W95USRV.PNG, RESULTS/N31USRV.PNG, RESULTS/N31USRGU.PNG). 720p30 is
+  far beyond real-time software decode on an emulated Pentium, so frames are
+  dropped against the clock and display is intermittent; the decode itself is
+  correct (and is pixel-exact for H.264/MP4 in the independent matrix). An
+  audio output device must be present for the playback clock to advance.
+- The new binary (DIST/RETRO.EXE) was propagated to BIN/RETRO.EXE and
+  BUILD/ASM/RETRO.EXE; SCRIPTS/INSPACK.PY regenerated BUILD/SETUP (payload +
+  FILES.DAT/FILES.SHA). BIN/README.TXT and the installer README no longer call
+  the build "incomplete" and correct the (previously wrong) "no Win16 build"
+  note. No push has been made.
+
+Environment
+- Restored on a new host (Ubuntu 24.04, 2 cores, Xeon 2.8 GHz) with the same
+  Debian 13 tools (GCC 14.2 MinGW, QEMU 10.0.13). RETRO.EXE and AFMTEST.EXE
+  rebuild bit-identically. The complete engine chain (MinGW CRT, C++ runtime,
+  dependencies, FFmpeg thread/assembly profiles, dav1d, VLC core and 249
+  plugins) was rebuilt from SOURCES/CURRENT into BUILD/REBUILD; those DLLs
+  are functionally equivalent but not byte-identical (BUILD/REBUILD is not
+  shipped as the candidate; the 7 XMOD Xiph/Speex plugins were not rebuilt).
+- This host gives about 1.7x lower guest throughput than the previous one
+  (plugin-cache generation 17.7 s instead of 10.1 s on NT3.51). Real-time
+  A/V acceptance captures that passed there fail here with "playback too
+  late/early" corrections; audio-only captures still pass. Timing results
+  from different hosts must not be mixed.
+- Guest disks were rebuilt from the supplied images (TESTDISK/INPUT.SHA):
+  HDA drivers (AUDIONT on NT, WINAUDIO on 95), the candidate, test programs
+  and a StartUp launcher (TESTS/VMSTART.C) for the serial agent. VMAGENT
+  gained OFF (clean ExitWindowsEx shutdown) and CLKPROBE.EXE. NT3.51 was
+  again built from the supplied installed files (SCRIPTS/MKNT351.PY) and
+  boots and logs on. AVRUN keeps its 50 Hz screenshots in /dev/shm.
+
+Integration and installer
+- The BIN candidate is now the main profile: its LIBCORE and four plugins
+  replaced the BUILD/ASM files (previous ones in BUILD/ASMPRE, record in
+  RESULTS/ASMINTEG.JSN). BUILD/SETUP was regenerated (293 payload files;
+  old installer in BUILD/SETUPOLD).
+- GUI installation completed on NT3.1, NT3.51 (C:\RETROPLA), NT4 and Win95
+  (C:\Program Files\RetroPlayer): N31I3OK/N351I3OK/N40I3OK/W95I3OK.PPM.
+  N31/N351/N40/W95INH4.JSN: all 293 installed files match the manifest.
+  Installer harness INSTEST: 86/86 on all four guests (M2/IV reports).
+
+Functional matrix of the integrated payload (tag M2, repeats Y7)
+- NT3.51 and Win95: all 8 programs pass (plugin cache, 308 clock/wait checks,
+  24 audio formats, 82 video checks, 14-program suite, GUI, installer
+  harness where applicable, plugin preflight).
+- NT4: all pass; the GUI test passes 31/31 (N40Y7UI) once the Welcome window
+  is closed at log-on, as in the earlier JR repeat.
+- NT3.1: all pass except AFMTEST's first case. RESULTS/N31FIRST.TXT records
+  the investigation: rotated order passes 24/24, a forced multimedia clock
+  does not help, instrumented core traces show the first stream is decoded
+  and output; libvlc state/amem callback delivery for the first player of
+  an NT3.1 process is the open fault.
+
+Output matrix on this host
+- NT3.51 HDA (L1/L3/L6): continuous tones and short clips pass (three tone
+  repeats pass); the 80-scene A/V check and the 2.5 ms Opus check fail with
+  CPU-starvation clock corrections. The earlier K7 pass/fail (15/16) on the
+  faster host remains the reference result for the candidate.
+- Sound Blaster comparison, Win95, native Creative SB16/AWE-32 driver
+  (SBCMP.JSN): Opus packet sizes, short clips and continuous tones PASS;
+  A/V fails as with HDA on this host.
+
+Win32s 1.30c on Windows 3.1 (RESULTS/W32STEST.TXT)
+- Installed from the three supplied disks; FreeCell control PASS.
+- RetroPlayer's PE files load; RETRO.EXE creates its window and loads
+  LIBVLC.DLL, but libvlc_new never returns. W32CAPS shows CreateThread and
+  CreateEvent fail with error 120: Win32s has no threads, which the LibVLC
+  engine requires. This is a platform limit; Windows 3.x playback needs the
+  native 16-bit player.
+
+Native 16-bit player (WIN16.MD) - BUILT AND GUEST-TESTED
+- SRC16: RETRO16.C (GUI, menus, Win3.0 built-in open dialog, MCI path),
+  DECODE.C (WAVE/VOC/AU/AIFF: PCM, IMA and MS ADPCM, mu-law, A-law), AOUT.C
+  (MMSYSTEM waveOut loaded at run time; direct Sound Blaster DSP/DMA when no
+  wave driver exists). BUILD16.SH builds DIST16/RETRO16.EXE with Open Watcom v2
+  as a 16-bit NE executable (imports only KERNEL/USER/GDI).
+- DECODE.C host regression (RESULTS/W16DEC.JSN): 13/15 fixtures bit-exact vs
+  ffmpeg; IMA ADPCM differs by at most 30/32767 (different rounding formula).
+- Guest playback verified on all five required configurations (RESULTS/
+  W16GUEST.JSN): Windows 3.0 real/standard/enhanced and Windows 3.1
+  standard/enhanced, all PASS, tones confirmed exact. Enhanced mode uses a VDS
+  page-lock plus time-paced single-cycle DMA because Windows 3.0 VDMAD cannot
+  virtualise auto-init DMA; real/standard use gap-free auto-init DMA. The
+  interactive GUI (built-in Open dialog, playback, Help/About, icon) was also
+  verified on Windows 3.0 enhanced. The supplied images have no wave driver, so
+  the direct Sound Blaster path was exercised; MMSYSTEM waveOut engages
+  automatically when a wave driver is present.
+
+REMAINING WORK (current)
+1. DONE: RETRO16.EXE built and tested on Windows 3.0 real/standard/enhanced
+   and 3.1 standard/enhanced (direct SB path, all PASS). The MMSYSTEM waveOut
+   path was additionally verified on Windows 3.1 with the user's WINAUDIO 1.1
+   driver (github.com/ages2001/WINAUDIO): 16-bit output through the QEMU HD
+   Audio codec, tones exact (RESULTS/W16GUEST.JSN). MCI (MIDI/AVI) needs a
+   matching output driver.
+2. DONE (coverage): FFmpeg 8.1.2 ships with every native decoder/demuxer (502
+   decoders, 358 demuxers) plus dav1d (AV1) and VLC native modules. Today's
+   video codecs re-verified pixel-exactly on the shipped engine, NT4 and Win95:
+   H.264, HEVC, VP9, AV1 in MP4/MKV/WebM (RESULTS/MODVIDEO.JSN, 50 checks, 0
+   failures). See FORMATS.MD. Only OS-provided acceleration, networking and
+   capture remain platform-limited (not code gaps).
+3. Fix the NT3.1 first-player event/callback delivery fault (N31FIRST.TXT) -
+   test-harness anomaly; actual NT3.1 playback (UITEST, 14-program suite) passes.
+4. Repeat real-time A/V acceptance on a host at least as fast as the K7 host,
+   or reduce per-packet CPU cost; NT3.51 HEVC scene 11 remains from K7.
+Host-compatibility edits: build scripts take RP_JOBS (default 4) for -j;
+XMOD.SH accepts RP_XMOD_OUT; SETUP.SH uses the root APT sandbox user;
+TESTS/WAVSINK.C checks write()'s result for Ubuntu's fortified headers.
+No push has been made.
+
+------------------------------------------------------------------------------
+RETROPLAYER - CURRENT DEVELOPMENT HANDOFF
+Prepared: 2026-11-02 (Europe/Istanbul)
+Last completed guest playback matrix: 2026-10-26
+
+CURRENT STATE
+=============
+This archive contains the current development work, not a finished release.
+The complete 32-bit port is unfinished. Native 16-bit implementation has not
+started. No push has been made. This handoff was requested before completion;
+it does not replace the requested final validation and Sound Blaster retest.
+
+BIN contains the latest combined candidate used for the K5 and K7/K9 tests:
+MMTSC2 core (including SYNCRATE), MP4TIME, uninstrumented WPROBE, RSTREAM,
+and GDIPREP2, with the existing 256-plugin assembly profile. The binaries
+have not been rebuilt or silently changed for this handoff. BINSTATE.JSN
+records their sources and hashes. BINAUDIT.JSN records PE32/header checks.
+
+BUILD/ASM is an earlier integrated baseline. BUILD/SETUP is an older
+254-plugin installer payload. Neither directory is the current BIN payload.
+Do not use the old installer to install the current candidate. Other BUILD
+directories retain experimental and diagnostic binaries, including failures.
+
+WHAT WAS REQUESTED
+==================
+1. RetroPlayer based on the latest VLC, with all supported VLC file formats
+   and every acceleration path that can be implemented on the target OS.
+   The pinned, previously verified stable base is VLC 3.0.24, commit
+   6de05adcbaf2e8b85fe86aad4169393098628119. No new upstream-version check
+   was performed when preparing this archive.
+2. 32-bit Windows NT 3.1/3.5x/4 and Windows 95/98/ME; i386 and later x86.
+   The supplied NT3.1, NT3.51, NT4 and Win95 environments are the requested
+   32-bit acceptance guests. NT3.51 was supplied as installed files and
+   needed a bootable VHD.
+3. Finish the full 32-bit player before implementing native 16-bit support.
+   Later: Windows 3.0 real, standard and enhanced modes; Windows 3.1x
+   standard and enhanced modes. Supplied Win3.0 and Win3.1 disks suffice.
+4. Additionally check the latest 32-bit player on Win3.1 with the supplied
+   Microsoft Win32s 1.30c package. This is separate from native Win16 support.
+5. Project code, documentation and UI in English; conversation in Turkish.
+   RetroPlayer runtime/project filenames follow DOS 8.3 naming.
+6. C:\RETROPLA for NT3.xx and Win3.x. C:\Program Files\RetroPlayer for
+   NT4 and Win95/98/ME. Never assume a particular generated short alias.
+7. HDA audio using ages2001/WINAUDIO on Windows 9x and ages2001/AUDIONT
+   on NT. Also retest Sound Blaster before the final release ZIP.
+8. Implement missing dependencies/APIs as needed, preserve original test
+   images, keep working without routine approval requests, and do not push
+   until explicitly instructed.
+9. Provide this current BIN/SRC/build/test handoff as a ZIP, with requested,
+   completed and remaining work documented in a TXT file.
+
+WHAT HAS BEEN IMPLEMENTED AND CHECKED
+====================================
+- Cloud build environment, i386 PE32 cross-build scripts, source provenance,
+  patches, dependency sources, filename/import/header audits, VM automation,
+  regression programs and independent captured-output analyzers.
+- Booted the supplied NT3.1, NT4 and Win95 installations. Built a private
+  bootable NT3.51 disk from the supplied installed files. Originals were
+  not used as writable test targets.
+- Win32 frontend with file open, playback, pause, stop, seek and explicit
+  engine failure reporting. GDI video, Unicode paths on NT, subtitle and
+  frontend tests exist. Earlier actual installer tests cover rollback,
+  payload validation and the required NT/9x installation paths.
+- Legacy runtime work includes atomic operations, kernel/UTF-8 adapters,
+  CRT filesystem/time functions, synchronization, emulated TLS, C++ runtime
+  support and networking adapters. These are partial platform coverage,
+  not a claim that all modern Windows APIs have been implemented.
+- VLC core and modern software decoding run on the four NT/9x test guests.
+  Tested examples include H.264, HEVC, VP9, AV1, AAC, MP3, FLAC, ALAC,
+  Vorbis, Opus, AC-3/E-AC-3, WMA, WavPack, Speex, common legacy video,
+  containers, images, SRT and ASS subtitles. AFORMAT.MD and VFORMAT.MD
+  specify the actual cases; this is not complete VLC format coverage.
+- HDA is configured with pinned WINAUDIO/AUDIONT driver revisions. The
+  driver sources were not modified during the recent timing investigation.
+- Corrected the MP4 edit-list/composition timestamp ordering for initial
+  reordered pictures. A single-module comparison verifies the first video
+  timestamp correction (MP4PROOF.JSN).
+- Added guarded single-CPU QEMU TCG counter calibration. MMTSC2 waits for
+  the legacy timer phase to settle before sampling. Noneligible hardware
+  keeps the existing multimedia-clock fallback. All 12 native idle probe
+  trials select the counter, and 32 controlled calibration checks pass.
+- SYNCRATE makes drift-correction slope depend on media duration, avoiding
+  a faster pitch ramp for small Opus packets. Its controlled test has 957
+  passing checks; the preceding implementation fails four cases.
+- Stateful fractional resampling, prepared GDI rendering and bounded,
+  measured-latency waveOut buffering have dedicated regression evidence.
+- Host WAV observation and command pacing improve the test harness.
+  They do not change guest sound samples or weaken acceptance thresholds.
+
+LATEST TEST RESULTS AND LIMITS
+=============================
+K5 content matrix: seven jobs per guest, covering plugin cache, clock/wait
+behavior, 24 audio cases, 82 video checks, the 14-program suite, 38 GUI
+checks and plugin preflight enumeration.
+
+  NT3.51: all seven jobs passed.
+  NT4:    all seven jobs passed.
+  Win95:  all seven jobs passed.
+  NT3.1:  six jobs passed; the first MP3 case reached the unchanged timeout
+          during concurrent testing. The other 23 audio cases passed.
+          The unchanged 24-case test then passed when run alone.
+
+K5PROOF.JSN retains the failure. N31KAPF.JSN pins the isolated repeat.
+An enumeration job passing does not mean every enumerated plugin is usable;
+missing platform APIs remain explicitly unavailable in its detailed report.
+
+K7/K9 independent output matrix: other guests paused, callback-mode QEMU
+HDA, unchanged limits, cleanly closed WAV captures. This is emulated-device
+evidence, not physical speaker, display or sound-card certification.
+
+  Guest    A/V (80 scenes)  Opus (9 tones)  Short clips (5)  Long tones
+  NT3.1    PASS             PASS            PASS             PASS
+  NT3.51   FAIL (1 scene)   PASS            PASS             PASS
+  NT4      PASS             PASS            PASS             PASS
+  Win95    PASS             PASS            PASS             PASS
+
+15 of 16 checks pass. NT3.51 HEVC scene 11 is visibly late: audio leads
+video by about 338-406 ms, outside the unchanged 150 ms limit. This failure
+prevents accepting the candidate as complete. K7PROOF.JSN pins all reports
+and captures. Earlier passing reports do not override later failures.
+
+Tests mainly use QEMU Pentium-family CPUs. A separate TSC-less 486 NT3.1
+run passes content tests with no audio device. Physical i386 execution and
+universal hardware support are unverified. The selected HDA driver has its
+own Pentium/TSC requirement. Decoding support is not a real-time performance
+guarantee on every CPU. QEMU's default HDA timer mode has separate failures;
+the recent matrix explicitly uses callback mode.
+
+WIN32S STATUS
+=============
+The supplied archive passed CRC verification and its three setup floppies
+were extracted. Win3.1 booted in enhanced mode and Win32s Setup started.
+The first install lacked DOS SHARE and the DISK1/DISK2/DISK3 directory
+layout. Cancellation also reported a missing OLE backup. That attempt was
+preserved separately. A fresh private retry disk now has the correct disk
+directories and SHARE enabled; the retry has not been booted yet.
+
+Therefore Win32s installation is NOT validated, FreeCell has NOT passed as
+a control, and RetroPlayer startup/playback under Win32s is NOT tested.
+The existing installer explicitly rejects Win32s; application compatibility
+must be tested separately by staging the candidate in C:\RETROPLA. Do not
+infer a successful or failed player test from the incomplete setup attempt.
+W32RETRY.JSN and W32*.PPM preserve the observed setup state.
+
+REMAINING WORK
+==============
+1. Diagnose and fix NT3.51's remaining HEVC presentation delay; investigate
+   the concurrent NT3.1 MP3 timeout. Repeat the affected checks, then accept
+   the combined candidate only with adequate full-matrix evidence.
+2. Finish all VLC format/dependency modules, missing platform APIs, feasible
+   acceleration, network providers and broader playback behavior. Current
+   plugin count and selected test fixtures are not full feature completion.
+3. Validate CPU fallback and target-specific hardware behavior. Separate
+   unsupported platform features from enabled/tested ones. Complete any
+   required legacy audio alternatives for hardware below the HDA minimum.
+4. Complete the clean Win32s installation, verify FreeCell, test the exact
+   candidate's setup/frontend/core/playback, and record actual incompatibilities.
+5. Run the requested fresh Sound Blaster comparison with the current payload.
+   The earlier Win95 SB16 success is historical, not validation of MMTSC2.
+6. After acceptance, integrate the candidate into the main profile, regenerate
+   the installer from the current payload, and retest installation, cache,
+   paths, rollback and installed file hashes on the target guests.
+7. Complete 32-bit scope before native Win16 work. Implement and validate
+   Win3.0 real/standard/enhanced and Win3.1 standard/enhanced support later.
+8. Produce the final release only after those requirements are satisfied.
+   Push remains prohibited until the user explicitly authorizes it.
+
+ARCHIVE CONTENTS AND USE
+=======================
+BIN/             Current candidate: player, DLLs, 256 plugins, font, cache
+                 helper, licenses and an incomplete-build notice.
+SRC/             RetroPlayer frontend, runtime adapters and installer code.
+SOURCES/         Pinned upstream source archives and provenance.
+SOURCES/CURRENT/ Full snapshots of the current external working source trees.
+PATCHES/         Port patches; LEGACY.DIF refreshed from the current VLC tree.
+BUILD/           Existing intermediate/diagnostic profiles and old installer.
+SCRIPTS/, TESTS/  Automation, build/test programs and analyzers.
+RESULTS/         Existing logs, JSON reports, screenshots and audio captures,
+                 including failed and superseded runs.
+DRIVERS/         Pinned requested driver artifacts; related sources/licenses
+                 remain in SOURCES and LICENSES.
+FILES.SHA        SHA-256 for every other ZIP member.
+
+For a manual candidate test, copy the contents of BIN into C:\RETROPLA on
+NT3.xx, or C:\Program Files\RetroPlayer on NT4/9x. Keep its subdirectories.
+Run CACHE.EXE once there, then RETRO.EXE. This is an incomplete development
+candidate. Win3.x/Win32s compatibility has not been established.
+
+Build scripts expect the documented /workspace layout and Linux cross tools.
+Use the current working-source snapshots for exact handoff source state;
+each archive restores its named tree under /workspace. Upstream filenames
+inside source archives are preserved for host builds. Project ZIP paths and
+the Windows payload are audited for DOS 8.3 names. Linux tools, credentials,
+unrelated repositories, Windows/Win32s installation media, writable VM disks
+and the previous delivery ZIP are not included. These are not player sources.
+This handoff has not been rebuilt and retested from scratch on a new host.
+
+Read START.TXT first. STATUS.MD, AVSYNC.MD, HDA.MD, TASK.MD and the original
+reports contain the detailed history. This TXT is the current handoff status.
